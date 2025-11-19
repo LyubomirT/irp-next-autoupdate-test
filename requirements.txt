@@ -2,6 +2,5 @@ pyside6
 playwright
 qasync
 requests
-qt-material
 fastapi
 uvicorn
