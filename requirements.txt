@@ -4,3 +4,4 @@ qasync
 requests
 fastapi
 uvicorn
+patchright
