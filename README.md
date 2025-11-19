@@ -1,6 +1,9 @@
 >[!NOTE]
 > This is a work in progress. The content may change frequently and could be incomplete. Do NOT rely on this for production use.
 
+>[!IMPORTANT]
+> This is not the original IntenseRP Next project. Here I'm rebuilding it from scratch with new technologies and approaches. Right now it's in a state of messy, inefficient reverse-engineering and prototyping, but eventually it will eat its predecessor and restore "the glory" of IntenseRP Next.
+
 # What's known
 
 - v2 will use Python and FastAPI for the backend.
