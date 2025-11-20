@@ -90,8 +90,33 @@ def run_testing_workflow(page):
     time.sleep(2)
     
     # 4. Test Send Message
-    print("Testing Send Message...")
-    deepseek_utils.send_message(page)
+    #print("Testing Send Message...")
+    #deepseek_utils.send_message(page)
+    #time.sleep(2)
+
+    # 5. Test Sidebar Status
+    print("Testing Sidebar Status...")
+    # Close sidebar
+    deepseek_utils.set_sidebar_status(page, False)
+    time.sleep(2)
+    # Open sidebar
+    deepseek_utils.set_sidebar_status(page, True)
+    time.sleep(2)
+
+    # 6. Test New Chat (Sidebar)
+    print("Testing New Chat (Sidebar)...")
+    deepseek_utils.click_new_chat(page, source="sidebar")
+    time.sleep(2)
+
+    # 7. Test New Chat (Simple)
+    print("Testing New Chat (Simple)...")
+    # Must close sidebar first to see simple button
+    deepseek_utils.set_sidebar_status(page, False)
+    time.sleep(1)
+    deepseek_utils.click_new_chat(page, source="simple")
+    time.sleep(2)
+    # Re-open sidebar for good measure
+    deepseek_utils.set_sidebar_status(page, True)
     
     print("\n--- Testing Workflow Completed ---\n")
 
