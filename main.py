@@ -1,162 +1,129 @@
-from patchright.sync_api import sync_playwright
-import time
-import subprocess
 import sys
-import os
-from dotenv import load_dotenv
+import asyncio
+import uvicorn
+from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel
+from PySide6.QtCore import Slot
+import qasync
 
-load_dotenv()
+from deepseek_driver import DeepSeekDriver
+from api import API
 
-import deepseek_utils
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("IntenseRP Next v2 (indev)")
+        self.resize(300, 150)
 
-def ensure_browsers_installed():
-    """
-    Checks for browser binaries and installs them if needed.
-    Since checking existence is complex, we'll run the install command which is idempotent.
-    """
-    print("Ensuring Chromium is installed...")
-    try:
-        # Attempt to install chromium using patchright's CLI
-        subprocess.run([sys.executable, "-m", "patchright", "install", "chromium"], check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"Error installing browsers: {e}")
-    except Exception as e:
-        print(f"Unexpected error during browser installation: {e}")
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.layout = QVBoxLayout(self.central_widget)
 
-def handle_login(page):
-    """
-    Handles the login process if redirected to the sign-in page.
-    """
-    # Check if we were redirected to sign in
-    if "sign_in" in page.url:
-        print("Redirected to sign in page. Attempting to log in...")
-        
-        email = os.getenv("DEEPSEEK_EMAIL")
-        password = os.getenv("DEEPSEEK_PASSWORD")
-        
-        if not email or not password:
-            print("Error: DEEPSEEK_EMAIL or DEEPSEEK_PASSWORD not found in environment variables.")
-            return
+        self.status_label = QLabel("Ready")
+        self.layout.addWidget(self.status_label)
+
+        self.start_button = QPushButton("Start")
+        self.start_button.clicked.connect(self.on_start_clicked)
+        self.layout.addWidget(self.start_button)
+
+        self.driver = None
+        self.api = None
+        self.server = None
+
+    @Slot()
+    def on_start_clicked(self):
+        if self.start_button.text() == "Start":
+            self.start_button.setEnabled(False)
+            self.status_label.setText("Starting...")
+            # Schedule the start_services coroutine
+            asyncio.create_task(self.start_services())
         else:
-            try:
-                # Wait for the form to appear
-                page.wait_for_selector(".ds-sign-up-form__main")
-                
-                # Fill email
-                print(f"Entering email: {email}")
-                page.fill("input[type='text']", email)
-                
-                # Fill password
-                print("Entering password...")
-                page.fill("input[type='password']", password)
-                
-                # Click login button
-                print("Clicking login button...")
-                page.click(".ds-sign-up-form__register-button")
-                
-                # Wait for navigation back to the chat page
-                page.wait_for_url("https://chat.deepseek.com/")
-                print("Login successful.")
-                
-            except Exception as e:
-                print(f"Error during auto-login: {e}")
-    else:
-        print("Not redirected to sign in. Continuing...")
+            self.start_button.setEnabled(False)
+            self.status_label.setText("Stopping...")
+            asyncio.create_task(self.stop_services())
 
-def run_testing_workflow(page):
-    """
-    Runs a testing workflow to verify the mini-utils.
-    """
-    print("\n--- Starting Testing Workflow ---\n")
-    
-    # 1. Test DeepThink Toggle
-    print("Testing DeepThink Toggle...")
-    deepseek_utils.set_deepthink_state(page, True)
-    time.sleep(2)
-    deepseek_utils.set_deepthink_state(page, False)
-    time.sleep(2)
-    
-    # 2. Test Search Toggle
-    print("Testing Search Toggle...")
-    deepseek_utils.set_search_state(page, True)
-    time.sleep(2)
-    deepseek_utils.set_search_state(page, False)
-    time.sleep(2)
-    
-    # 3. Test Message Entry
-    print("Testing Message Entry...")
-    test_message = "Hello, admin is speaking. How are you today?"
-    deepseek_utils.enter_message(page, test_message)
-    time.sleep(2)
-    
-    # 4. Test Send Message
-    #print("Testing Send Message...")
-    #deepseek_utils.send_message(page)
-    #time.sleep(2)
+    async def start_services(self):
+        try:
+            self.driver = DeepSeekDriver()
+            self.api = API(self.driver)
+            
+            # Configure Uvicorn
+            config = uvicorn.Config(app=self.api.app, host="127.0.0.1", port=8000, log_level="info")
+            self.server = uvicorn.Server(config)
+            
+            # Start Driver
+            self.status_label.setText("Launching Browser...")
+            await self.driver.start()
+            
+            # Start API Server
+            self.status_label.setText("Starting API Server...")
+            # We run server.serve() as a task because it blocks
+            self.server_task = asyncio.create_task(self.server.serve())
+            
+            self.status_label.setText("Running (Port 8000)")
+            self.start_button.setText("Stop")
+            self.start_button.setEnabled(True)
+            
+        except Exception as e:
+            self.status_label.setText(f"Error: {e}")
+            self.start_button.setEnabled(True)
+            self.start_button.setText("Start")
+            print(f"Error starting services: {e}")
 
-    # 5. Test Sidebar Status
-    print("Testing Sidebar Status...")
-    # Close sidebar
-    deepseek_utils.set_sidebar_status(page, False)
-    time.sleep(2)
-    # Open sidebar
-    deepseek_utils.set_sidebar_status(page, True)
-    time.sleep(2)
+    async def stop_services(self):
+        print("Stopping services...")
+        try:
+            if self.api:
+                await self.api.stop()
+                
+            if self.server:
+                self.server.should_exit = True
+                if hasattr(self, 'server_task'):
+                    await self.server_task
+            
+            if self.driver:
+                await self.driver.close()
+                
+            self.status_label.setText("Stopped")
+            self.start_button.setText("Start")
+            self.start_button.setEnabled(True)
+            print("Services stopped.")
+        except Exception as e:
+            print(f"Error stopping services: {e}")
+            self.status_label.setText(f"Error stopping: {e}")
+            self.start_button.setEnabled(True)
 
-    # 6. Test New Chat (Sidebar)
-    print("Testing New Chat (Sidebar)...")
-    deepseek_utils.click_new_chat(page, source="sidebar")
-    time.sleep(2)
+    def closeEvent(self, event):
+        # Cleanup on close
+        print("Window closing, shutting down...")
+        # qasync loop runs until the window closes usually, but we need to await the cleanup.
+        
+        if self.status_label.text() == "Stopped" or self.status_label.text() == "Ready":
+            event.accept()
+            return
 
-    # 7. Test New Chat (Simple)
-    print("Testing New Chat (Simple)...")
-    # Must close sidebar first to see simple button
-    deepseek_utils.set_sidebar_status(page, False)
-    time.sleep(1)
-    deepseek_utils.click_new_chat(page, source="simple")
-    time.sleep(2)
-    # Re-open sidebar for good measure
-    deepseek_utils.set_sidebar_status(page, True)
-    
-    print("\n--- Testing Workflow Completed ---\n")
+        event.ignore()
+        self.status_label.setText("Shutting down...")
+        
+        async def cleanup_and_close():
+            await self.stop_services()
+            # Now we can close
+            # We need to call close again, but bypass this check
+            # We can reset the status label
+            self.status_label.setText("Stopped")
+            self.close()
+            
+        asyncio.create_task(cleanup_and_close())
 
 def main():
-    ensure_browsers_installed()
+    app = QApplication(sys.argv)
+    loop = qasync.QEventLoop(app)
+    asyncio.set_event_loop(loop)
 
-    with sync_playwright() as p:
-        # Launch Chromium
-        # headless=False to see the browser
-        print("Launching Chromium...")
-        browser = p.chromium.launch(headless=False)
-        
-        # Create a new context
-        context = browser.new_context()
-        
-        # Create a new page
-        page = context.new_page()
-        
-        print("Navigating to https://chat.deepseek.com/ ...")
-        page.goto("https://chat.deepseek.com/")
-        
-        # Handle Login
-        handle_login(page)
-        
-        # Run Testing Workflow
-        # This is an arbitrary wait because sometimes the page takes time to load after login
-        # Even if Playwright handles it pretty well, I still have Selenium trauma
-        time.sleep(3)
-        run_testing_workflow(page)
-        
-        print("Page loaded. Press Ctrl+C to exit.")
-        
-        # Keep the script running to keep the browser open
-        try:
-            # Will interrupt with Ctrl+C
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print("\nClosing browser...")
-            browser.close()
+    window = MainWindow()
+    window.show()
+
+    with loop:
+        loop.run_forever()
 
 if __name__ == "__main__":
     main()
