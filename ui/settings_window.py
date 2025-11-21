@@ -1,0 +1,277 @@
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QListWidget, 
+    QScrollArea, QLabel, QPushButton, QFrame, QMessageBox, QDialog
+)
+from PySide6.QtCore import Qt, Signal
+from config.manager import ConfigManager
+from config.schema import SCHEMA, SettingType
+from .brand import BrandColors
+from .components import Tumbler
+
+class SettingsWindow(QMainWindow):
+    settings_saved = Signal()
+
+    def __init__(self, config_manager: ConfigManager, parent=None):
+        super().__init__(parent)
+        self.config_manager = config_manager
+        self.setWindowTitle("Settings")
+        self.resize(900, 700)
+        self.setStyleSheet(f"background-color: {BrandColors.WINDOW_BG}; color: {BrandColors.TEXT_PRIMARY};")
+        
+        self.unsaved_changes = False
+        self.field_widgets = {} # Map "category.key" -> widget
+
+        self._init_ui()
+        self._load_values()
+
+    def _init_ui(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QHBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Left Sidebar (Categories)
+        self.category_list = QListWidget()
+        self.category_list.setFixedWidth(250)
+        self.category_list.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {BrandColors.SIDEBAR_BG};
+                border: none;
+                outline: none;
+                font-size: {BrandColors.FONT_SIZE_LARGE}; /* Applied to widget directly */
+            }}
+            QListWidget::item {{
+                padding: 20px;
+                color: {BrandColors.TEXT_SECONDARY};
+            }}
+            QListWidget::item:selected {{
+                background-color: {BrandColors.ITEM_SELECTED};
+                color: {BrandColors.TEXT_PRIMARY};
+                border-left: 4px solid {BrandColors.ACCENT};
+            }}
+            QListWidget::item:hover {{
+                background-color: {BrandColors.ITEM_HOVER};
+            }}
+        """)
+        self.category_list.itemClicked.connect(self._on_category_clicked)
+        main_layout.addWidget(self.category_list)
+
+        # Right Content Area
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(30, 30, 30, 30)
+        
+        # Scroll Area for Settings
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.NoFrame)
+        
+        # Custom Scrollbar Styling
+        self.scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: {BrandColors.WINDOW_BG};
+                border: none;
+            }}
+            QScrollBar:vertical {{
+                border: none;
+                background: {BrandColors.WINDOW_BG};
+                width: 12px;
+                margin: 0px;
+                border-radius: 6px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: #555555;
+                min-height: 20px;
+                border-radius: 6px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: #666666;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+                subcontrol-position: bottom;
+                subcontrol-origin: margin;
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
+        """)
+        
+        self.scroll_content = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_content)
+        self.scroll_layout.setContentsMargins(0, 0, 10, 0) # Add right margin for scrollbar space
+        self.scroll_layout.setSpacing(20)
+        self.scroll_layout.setAlignment(Qt.AlignTop)
+        
+        self.category_widgets = {} # Map category key -> widget (for scrolling)
+
+        # Generate Fields
+        for category in SCHEMA:
+            # Add to list
+            self.category_list.addItem(category.name)
+            
+            # Category Card
+            card = QWidget()
+            card.setStyleSheet(f"""
+                QWidget {{
+                    background-color: {BrandColors.SIDEBAR_BG};
+                    border-radius: 8px;
+                }}
+            """)
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(20, 15, 20, 20)
+            card_layout.setSpacing(15)
+            
+            self.category_widgets[category.name] = card
+            
+            # Header
+            header = QLabel(category.name)
+            header.setStyleSheet(f"""
+                font-size: {BrandColors.FONT_SIZE_TITLE}; 
+                font-weight: bold; 
+                color: {BrandColors.TEXT_PRIMARY};
+                background-color: transparent;
+            """)
+            card_layout.addWidget(header)
+            
+            # Divider
+            divider = QFrame()
+            divider.setFrameShape(QFrame.HLine)
+            divider.setFrameShadow(QFrame.Sunken)
+            divider.setStyleSheet(f"background-color: {BrandColors.ITEM_SELECTED}; margin-bottom: 5px;")
+            card_layout.addWidget(divider)
+            
+            # Fields
+            for field in category.fields:
+                field_container = QWidget()
+                field_container.setStyleSheet("background-color: transparent;")
+                field_layout = QHBoxLayout(field_container)
+                field_layout.setContentsMargins(0, 5, 0, 5)
+                
+                # Label
+                label = QLabel(field.label)
+                label.setToolTip(field.tooltip or "")
+                label.setStyleSheet(f"font-size: {BrandColors.FONT_SIZE_LARGE}; color: {BrandColors.TEXT_PRIMARY}; background-color: transparent;")
+                field_layout.addWidget(label)
+                
+                field_layout.addStretch()
+                
+                # Widget based on type
+                widget = None
+                if field.type == SettingType.BOOLEAN:
+                    widget = Tumbler()
+                    widget.stateChanged.connect(self._on_setting_changed)
+                
+                if widget:
+                    widget.setToolTip(field.tooltip or "")
+                    field_layout.addWidget(widget)
+                    self.field_widgets[f"{category.key}.{field.key}"] = widget
+                
+                card_layout.addWidget(field_container)
+            
+            self.scroll_layout.addWidget(card)
+
+        self.scroll_area.setWidget(self.scroll_content)
+        right_layout.addWidget(self.scroll_area)
+
+        # Bottom Buttons
+        button_layout = QHBoxLayout()
+        button_layout.setContentsMargins(0, 20, 0, 0) # Add top margin to separate from content
+        button_layout.addStretch()
+        
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setCursor(Qt.PointingHandCursor)
+        self.cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {BrandColors.SIDEBAR_BG};
+                color: {BrandColors.TEXT_PRIMARY};
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-size: {BrandColors.FONT_SIZE_REGULAR};
+            }}
+            QPushButton:hover {{
+                background-color: {BrandColors.ITEM_HOVER};
+            }}
+        """)
+        self.cancel_btn.clicked.connect(self.close)
+        button_layout.addWidget(self.cancel_btn)
+        
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setCursor(Qt.PointingHandCursor)
+        self.save_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {BrandColors.ACCENT};
+                color: {BrandColors.TEXT_PRIMARY};
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: {BrandColors.FONT_SIZE_REGULAR};
+            }}
+            QPushButton:hover {{
+                background-color: #4a80e0;
+            }}
+        """)
+        self.save_btn.clicked.connect(self.save_settings)
+        button_layout.addWidget(self.save_btn)
+        
+        right_layout.addLayout(button_layout)
+        main_layout.addWidget(right_widget)
+
+    def _load_values(self):
+        for category in SCHEMA:
+            for field in category.fields:
+                key = f"{category.key}.{field.key}"
+                value = self.config_manager.get_setting(category.key, field.key)
+                widget = self.field_widgets.get(key)
+                
+                if widget:
+                    widget.blockSignals(True)
+                    if field.type == SettingType.BOOLEAN:
+                        widget.setChecked(bool(value))
+                    widget.blockSignals(False)
+        self.unsaved_changes = False
+
+    def _on_setting_changed(self):
+        self.unsaved_changes = True
+
+    def _on_category_clicked(self, item):
+        category_name = item.text()
+        widget = self.category_widgets.get(category_name)
+        if widget:
+            self.scroll_area.ensureWidgetVisible(widget)
+
+    def save_settings(self):
+        for category in SCHEMA:
+            for field in category.fields:
+                key = f"{category.key}.{field.key}"
+                widget = self.field_widgets.get(key)
+                
+                if widget:
+                    value = None
+                    if field.type == SettingType.BOOLEAN:
+                        value = widget.isChecked()
+                    
+                    self.config_manager.set_setting(category.key, field.key, value)
+        
+        self.config_manager.save_settings()
+        self.unsaved_changes = False
+        self.settings_saved.emit()
+        self.close()
+
+    def closeEvent(self, event):
+        if self.unsaved_changes:
+            reply = QMessageBox.question(
+                self, "Unsaved Changes",
+                "You have unsaved changes. Are you sure you want to discard them?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()

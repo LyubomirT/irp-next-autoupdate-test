@@ -1,56 +1,87 @@
 import sys
 import asyncio
 import uvicorn
-from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QCheckBox
+from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QHBoxLayout
 from PySide6.QtCore import Slot
 import qasync
 
 from deepseek_driver import DeepSeekDriver
 from api import API
+from config.manager import ConfigManager
+from ui.settings_window import SettingsWindow
+from ui.brand import BrandColors
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("IntenseRP Next v2 (indev)")
-        self.resize(300, 250)
+        self.resize(350, 200)
+        self.setStyleSheet(f"background-color: {BrandColors.WINDOW_BG}; color: {BrandColors.TEXT_PRIMARY};")
+
+        self.config_manager = ConfigManager()
 
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.layout = QVBoxLayout(self.central_widget)
 
         self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet(f"color: {BrandColors.TEXT_SECONDARY};")
         self.layout.addWidget(self.status_label)
 
+        # Buttons Layout
+        button_layout = QHBoxLayout()
+        
         self.start_button = QPushButton("Start")
+        self.start_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {BrandColors.ACCENT};
+                color: {BrandColors.TEXT_PRIMARY};
+                border: none;
+                padding: 10px;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #4a80e0;
+            }}
+        """)
         self.start_button.clicked.connect(self.on_start_clicked)
-        self.layout.addWidget(self.start_button)
+        button_layout.addWidget(self.start_button)
 
-        # Settings
-        self.deepthink_checkbox = QCheckBox("Enable DeepThink")
-        self.layout.addWidget(self.deepthink_checkbox)
+        self.settings_button = QPushButton("Settings")
+        self.settings_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {BrandColors.SIDEBAR_BG};
+                color: {BrandColors.TEXT_PRIMARY};
+                border: none;
+                padding: 10px;
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: {BrandColors.ITEM_HOVER};
+            }}
+        """)
+        self.settings_button.clicked.connect(self.open_settings)
+        button_layout.addWidget(self.settings_button)
+        
+        self.layout.addLayout(button_layout)
 
-        self.send_deepthink_checkbox = QCheckBox("Send DeepThink")
-        self.layout.addWidget(self.send_deepthink_checkbox)
-
-        self.search_checkbox = QCheckBox("Enable Search")
-        self.layout.addWidget(self.search_checkbox)
-
-        # Connect signals to update driver if it exists
-        self.deepthink_checkbox.stateChanged.connect(self.update_driver_settings)
-        self.send_deepthink_checkbox.stateChanged.connect(self.update_driver_settings)
-        self.search_checkbox.stateChanged.connect(self.update_driver_settings)
-
-        self.driver = None
-        self.api = None
         self.driver = None
         self.api = None
         self.server = None
+        self.settings_window = None
 
-    def update_driver_settings(self):
-        if self.driver:
-            self.driver.enable_deepthink = self.deepthink_checkbox.isChecked()
-            self.driver.send_deepthink = self.send_deepthink_checkbox.isChecked()
-            self.driver.enable_search = self.search_checkbox.isChecked()
+    def open_settings(self):
+        if not self.settings_window:
+            self.settings_window = SettingsWindow(self.config_manager, self)
+            self.settings_window.settings_saved.connect(self.on_settings_saved)
+        self.settings_window.show()
+
+    def on_settings_saved(self):
+        print("Settings saved.")
+        # If driver is running, it will pick up changes on next generation
+        # All thanks to the config manager being dynamic
+        pass
 
     @Slot()
     def on_start_clicked(self):
@@ -66,9 +97,8 @@ class MainWindow(QMainWindow):
 
     async def start_services(self):
         try:
-            self.driver = DeepSeekDriver()
-            # Apply initial settings
-            self.update_driver_settings()
+            # Pass config manager to driver
+            self.driver = DeepSeekDriver(self.config_manager)
             
             self.api = API(self.driver)
             
@@ -142,6 +172,30 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    
+    # Load Fonts
+    from PySide6.QtGui import QFontDatabase, QFont
+    import os
+    
+    font_dir = os.path.join(os.path.dirname(__file__), "ui", "fonts")
+    if os.path.exists(font_dir):
+        for filename in os.listdir(font_dir):
+            if filename.endswith(".ttf"):
+                QFontDatabase.addApplicationFont(os.path.join(font_dir, filename))
+    
+    # Set Global Font
+    font = QFont(BrandColors.FONT_FAMILY)
+    app.setFont(font)
+    
+    # Enforce Dark Mode Palette (or try to)
+    app.setStyleSheet(f"""
+        QWidget {{
+            font-family: '{BrandColors.FONT_FAMILY}';
+            background-color: {BrandColors.WINDOW_BG};
+            color: {BrandColors.TEXT_PRIMARY};
+        }}
+    """)
+
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
 

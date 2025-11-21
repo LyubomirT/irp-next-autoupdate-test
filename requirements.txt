@@ -7,3 +7,4 @@ uvicorn
 patchright
 python-dotenv
 httpx
+cryptography

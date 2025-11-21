@@ -9,17 +9,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class DeepSeekDriver:
-    def __init__(self):
+    def __init__(self, config_manager):
+        self.config_manager = config_manager
         self.playwright = None
         self.browser: Browser = None
         self.context: BrowserContext = None
         self.page: Page = None
         self.is_running = False
-        
-        # Settings
-        self.enable_deepthink = False
-        self.enable_search = False
-        self.send_deepthink = False
 
     async def start(self):
         """
@@ -174,8 +170,11 @@ class DeepSeekDriver:
             await self._enter_message(message)
             
             # Apply settings before sending
-            await self.set_deepthink_state(self.enable_deepthink)
-            await self.set_search_state(self.enable_search)
+            enable_deepthink = self.config_manager.get_setting("deepseek_behavior", "enable_deepthink")
+            enable_search = self.config_manager.get_setting("deepseek_behavior", "enable_search")
+            
+            await self.set_deepthink_state(enable_deepthink)
+            await self.set_search_state(enable_search)
             
             await self._send_message()
             
@@ -352,7 +351,8 @@ class DeepSeekDriver:
                                                             self.fragment_types_list.append(frag_type)
                                                             
                                                             # Handle THINK start
-                                                            if frag_type == "THINK" and self.send_deepthink:
+                                                            send_deepthink = self.config_manager.get_setting("deepseek_behavior", "send_deepthink")
+                                                            if frag_type == "THINK" and send_deepthink:
                                                                 content += "<think>"
                                                                 self.thinking_active = True
                                                             
@@ -364,7 +364,8 @@ class DeepSeekDriver:
                                                             # Initial content
                                                             if "content" in frag:
                                                                 if frag_type == "THINK":
-                                                                    if self.send_deepthink:
+                                                                    send_deepthink = self.config_manager.get_setting("deepseek_behavior", "send_deepthink")
+                                                                    if send_deepthink:
                                                                         content += frag["content"]
                                                                 elif frag_type == "SEARCH":
                                                                     pass
@@ -398,7 +399,8 @@ class DeepSeekDriver:
                                                 self.fragment_types_list.append(frag_type)
                                                 
                                                 # Handle THINK start
-                                                if frag_type == "THINK" and self.send_deepthink:
+                                                send_deepthink = self.config_manager.get_setting("deepseek_behavior", "send_deepthink")
+                                                if frag_type == "THINK" and send_deepthink:
                                                     content += "<think>"
                                                     self.thinking_active = True
                                                 
@@ -410,7 +412,8 @@ class DeepSeekDriver:
                                                 # Initial content
                                                 if "content" in frag:
                                                     if frag_type == "THINK":
-                                                        if self.send_deepthink:
+                                                        send_deepthink = self.config_manager.get_setting("deepseek_behavior", "send_deepthink")
+                                                        if send_deepthink:
                                                             content += frag["content"]
                                                     elif frag_type == "SEARCH":
                                                         pass
@@ -427,7 +430,8 @@ class DeepSeekDriver:
                                             frag_type = self.fragment_types_list[index]
                                             
                                             if frag_type == "THINK":
-                                                if self.send_deepthink:
+                                                send_deepthink = self.config_manager.get_setting("deepseek_behavior", "send_deepthink")
+                                                if send_deepthink:
                                                     content += str(v)
                                             elif frag_type == "SEARCH":
                                                 pass
