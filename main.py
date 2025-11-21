@@ -1,7 +1,7 @@
 import sys
 import asyncio
 import uvicorn
-from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel
+from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QCheckBox
 from PySide6.QtCore import Slot
 import qasync
 
@@ -12,7 +12,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("IntenseRP Next v2 (indev)")
-        self.resize(300, 150)
+        self.setWindowTitle("IntenseRP Next v2 (indev)")
+        self.resize(300, 250)
 
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
@@ -25,9 +26,32 @@ class MainWindow(QMainWindow):
         self.start_button.clicked.connect(self.on_start_clicked)
         self.layout.addWidget(self.start_button)
 
+        # Settings
+        self.deepthink_checkbox = QCheckBox("Enable DeepThink")
+        self.layout.addWidget(self.deepthink_checkbox)
+
+        self.send_deepthink_checkbox = QCheckBox("Send DeepThink")
+        self.layout.addWidget(self.send_deepthink_checkbox)
+
+        self.search_checkbox = QCheckBox("Enable Search")
+        self.layout.addWidget(self.search_checkbox)
+
+        # Connect signals to update driver if it exists
+        self.deepthink_checkbox.stateChanged.connect(self.update_driver_settings)
+        self.send_deepthink_checkbox.stateChanged.connect(self.update_driver_settings)
+        self.search_checkbox.stateChanged.connect(self.update_driver_settings)
+
+        self.driver = None
+        self.api = None
         self.driver = None
         self.api = None
         self.server = None
+
+    def update_driver_settings(self):
+        if self.driver:
+            self.driver.enable_deepthink = self.deepthink_checkbox.isChecked()
+            self.driver.send_deepthink = self.send_deepthink_checkbox.isChecked()
+            self.driver.enable_search = self.search_checkbox.isChecked()
 
     @Slot()
     def on_start_clicked(self):
@@ -44,6 +68,9 @@ class MainWindow(QMainWindow):
     async def start_services(self):
         try:
             self.driver = DeepSeekDriver()
+            # Apply initial settings
+            self.update_driver_settings()
+            
             self.api = API(self.driver)
             
             # Configure Uvicorn
