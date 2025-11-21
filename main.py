@@ -12,7 +12,6 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("IntenseRP Next v2 (indev)")
-        self.setWindowTitle("IntenseRP Next v2 (indev)")
         self.resize(300, 250)
 
         self.central_widget = QWidget()
