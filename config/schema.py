@@ -104,4 +104,66 @@ SCHEMA = [
             ),
         ]
     ),
+    SettingCategory(
+        name="Very Long Section",
+        key="very_long_section",
+        fields=[
+            SettingField(
+                key="very_long_bool_1",
+                label="Very Long Boolean 1",
+                type=SettingType.BOOLEAN,
+                default=True,
+                tooltip="A test boolean field."
+            ),
+            SettingField(
+                key="very_long_bool_2",
+                label="Very Long Boolean 2",
+                type=SettingType.BOOLEAN,
+                default=False,
+                tooltip="Another test boolean field."
+            ),
+            SettingField(
+                key="very_long_bool_3",
+                label="Very Long Boolean 3",
+                type=SettingType.BOOLEAN,
+                default=True,
+                tooltip="Yet another test boolean field."
+            ),
+            SettingField(
+                key="very_long_bool_4",
+                label="Very Long Boolean 4",
+                type=SettingType.BOOLEAN,
+                default=False,
+                tooltip="Another test boolean field."
+            ),
+            SettingField(
+                key="very_long_bool_5",
+                label="Very Long Boolean 5",
+                type=SettingType.BOOLEAN,
+                default=True,
+                tooltip="Yet another test boolean field."
+            ),
+            SettingField(
+                key="new_bool_1",
+                label="New Boolean 1",
+                type=SettingType.BOOLEAN,
+                default=True,
+                tooltip="A new test boolean field."
+            ),
+            SettingField(
+                key="new_bool_2",
+                label="New Boolean 2",
+                type=SettingType.BOOLEAN,
+                default=False,
+                tooltip="A new test boolean field."
+            ),
+            SettingField(
+                key="new_bool_3",
+                label="New Boolean 3",
+                type=SettingType.BOOLEAN,
+                default=True,
+                tooltip="A new test boolean field."
+            ),
+        ]
+    ),
 ]

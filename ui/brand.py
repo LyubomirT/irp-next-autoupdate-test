@@ -10,6 +10,12 @@ class BrandColors:
     ITEM_HOVER = "#2a2d2e"
     ITEM_SELECTED = "#37373d"
     
+    # Category Button Colors
+    CATEGORY_DEFAULT_BG = ITEM_HOVER  # Default appearance same as hover
+    CATEGORY_BORDER_DEFAULT = "#555555" # Gray border
+    CATEGORY_ACTIVE_BG = "#1a3c78" # Much darker shade of accent
+    CATEGORY_ACTIVE_BORDER = "#6b9eff" # Bluer version of accent
+    
     # Fonts
     FONT_FAMILY = "Blinker"
     

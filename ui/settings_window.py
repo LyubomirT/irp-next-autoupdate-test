@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QListWidget, 
     QScrollArea, QLabel, QPushButton, QFrame, QMessageBox, QDialog
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from config.manager import ConfigManager
 from config.schema import SCHEMA, SettingType
 from .brand import BrandColors
@@ -44,14 +44,23 @@ class SettingsWindow(QMainWindow):
             QListWidget::item {{
                 padding: 20px;
                 color: {BrandColors.TEXT_SECONDARY};
+                background-color: {BrandColors.CATEGORY_DEFAULT_BG};
+                border-left: 4px solid {BrandColors.CATEGORY_BORDER_DEFAULT};
+                margin-bottom: 2px; /* Small gap between items */
             }}
             QListWidget::item:selected {{
-                background-color: {BrandColors.ITEM_SELECTED};
+                background-color: {BrandColors.CATEGORY_ACTIVE_BG};
                 color: {BrandColors.TEXT_PRIMARY};
-                border-left: 4px solid {BrandColors.ACCENT};
+                border-left: 4px solid {BrandColors.CATEGORY_ACTIVE_BORDER};
+            }}
+            QListWidget::item:selected:hover {{
+                background-color: {BrandColors.CATEGORY_ACTIVE_BG};
+                color: {BrandColors.TEXT_PRIMARY};
+                border-left: 4px solid {BrandColors.CATEGORY_ACTIVE_BORDER};
             }}
             QListWidget::item:hover {{
                 background-color: {BrandColors.ITEM_HOVER};
+                color: {BrandColors.TEXT_PRIMARY};
             }}
         """)
         self.category_list.itemClicked.connect(self._on_category_clicked)
@@ -66,6 +75,10 @@ class SettingsWindow(QMainWindow):
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.NoFrame)
+        
+        # Connect scroll signal
+        self.scroll_area.verticalScrollBar().valueChanged.connect(self._on_scroll)
+        self.is_auto_scrolling = False
         
         # Custom Scrollbar Styling
         self.scroll_area.setStyleSheet(f"""
@@ -220,6 +233,9 @@ class SettingsWindow(QMainWindow):
         right_layout.addLayout(button_layout)
         main_layout.addWidget(right_widget)
 
+        # Select first category by default
+        self.category_list.setCurrentRow(0)
+
     def _load_values(self):
         for category in SCHEMA:
             for field in category.fields:
@@ -238,10 +254,65 @@ class SettingsWindow(QMainWindow):
         self.unsaved_changes = True
 
     def _on_category_clicked(self, item):
+        self.is_auto_scrolling = True
         category_name = item.text()
         widget = self.category_widgets.get(category_name)
         if widget:
             self.scroll_area.ensureWidgetVisible(widget)
+
+            # Let's just use a timer to reset the flag to be safe against race conditions
+            # I spent WAY too long trying to do this with signals alone
+            QTimer.singleShot(100, lambda: setattr(self, 'is_auto_scrolling', False))
+
+    def _on_scroll(self, value):
+        if self.is_auto_scrolling:
+            return
+
+        # Check if we are at the very bottom
+        v_bar = self.scroll_area.verticalScrollBar()
+        if value >= v_bar.maximum() - 5: # Small buffer for float inaccuracies
+            # Select the last category
+            count = self.category_list.count()
+            if count > 0:
+                last_item = self.category_list.item(count - 1)
+                if last_item != self.category_list.currentItem():
+                    self.category_list.blockSignals(True)
+                    self.category_list.setCurrentItem(last_item)
+                    self.category_list.blockSignals(False)
+            return
+
+        # Find which category is currently visible
+        # To do it, we'll check the vertical position of each category widget relative to the scroll area
+        
+        scroll_pos = value
+        closest_category = None
+        
+        # We want the category that is at the top of the view
+        # The scroll_content coordinates
+        
+        for name, widget in self.category_widgets.items():
+            # Get widget position relative to scroll content
+            widget_pos = widget.y()
+            
+            # If the widget is above the scroll position (or slightly below), it's a candidate.
+            # The last category whose Y position is <= scroll_pos + buffer is the active one.
+            
+            if widget_pos <= scroll_pos + 50: # 50px buffer
+                closest_category = name
+            else:
+                # Since they are ordered, once we find one that is further down, we can stop
+                pass
+        
+        # If we found a category, select it
+        if closest_category:
+            # Find the item in the list
+            items = self.category_list.findItems(closest_category, Qt.MatchExactly)
+            if items:
+                item = items[0]
+                if item != self.category_list.currentItem():
+                    self.category_list.blockSignals(True)
+                    self.category_list.setCurrentItem(item)
+                    self.category_list.blockSignals(False)
 
     def save_settings(self):
         for category in SCHEMA:
