@@ -5,6 +5,7 @@ class BrandColors:
     TUMBLER_ACTIVE_BG = ACCENT
     TEXT_PRIMARY = "#ffffff"
     TEXT_SECONDARY = "#a0a0a0"
+    TEXT_DISABLED = "#555555"
     WINDOW_BG = "#1e1e1e"
     SIDEBAR_BG = "#252526"
     ITEM_HOVER = "#2a2d2e"
@@ -15,6 +16,10 @@ class BrandColors:
     CATEGORY_BORDER_DEFAULT = "#555555" # Gray border
     CATEGORY_ACTIVE_BG = "#1a3c78" # Much darker shade of accent
     CATEGORY_ACTIVE_BORDER = "#6b9eff" # Bluer version of accent
+    
+    # Input Fields
+    INPUT_BG = "#2d2d2d"
+    INPUT_BORDER = "#444444"
     
     # Semantic Colors
     SUCCESS = "#5af043" # Green

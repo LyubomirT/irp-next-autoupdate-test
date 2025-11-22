@@ -49,37 +49,51 @@ class DeepSeekDriver:
         """
         # Check if we were redirected to sign in
         if "sign_in" in self.page.url:
-            print("Redirected to sign in page. Attempting to log in...")
+            print("Redirected to sign in page.")
             
-            email = os.getenv("DEEPSEEK_EMAIL")
-            password = os.getenv("DEEPSEEK_PASSWORD")
+            auto_login = self.config_manager.get_setting("providers_credentials", "auto_login")
             
-            if not email or not password:
-                print("Error: DEEPSEEK_EMAIL or DEEPSEEK_PASSWORD not found in environment variables.")
-                return
+            if auto_login:
+                print("Auto-login enabled. Attempting to log in...")
+                
+                # Get credentials from settings
+                email = self.config_manager.get_setting("providers_credentials", "deepseek_email")
+                password = self.config_manager.get_setting("providers_credentials", "deepseek_password")
+                
+                if not email or not password:
+                    print("Error: DeepSeek email or password not found in settings.")
+                    return
+                else:
+                    try:
+                        # Wait for the form to appear
+                        await self.page.wait_for_selector(".ds-sign-up-form__main")
+                        
+                        # Fill email
+                        print(f"Entering email: {email}")
+                        await self.page.fill("input[type='text']", email)
+                        
+                        # Fill password
+                        print("Entering password...")
+                        await self.page.fill("input[type='password']", password)
+                        
+                        # Click login button
+                        print("Clicking login button...")
+                        await self.page.click(".ds-sign-up-form__register-button")
+                        
+                        # Wait for navigation back to the chat page
+                        await self.page.wait_for_url("https://chat.deepseek.com/")
+                        print("Login successful.")
+                        
+                    except Exception as e:
+                        print(f"Error during auto-login: {e}")
             else:
+                print("Auto-login disabled. Waiting for manual login...")
+                # Wait indefinitely (or until closed) for the user to log in and reach the chat page
                 try:
-                    # Wait for the form to appear
-                    await self.page.wait_for_selector(".ds-sign-up-form__main")
-                    
-                    # Fill email
-                    print(f"Entering email: {email}")
-                    await self.page.fill("input[type='text']", email)
-                    
-                    # Fill password
-                    print("Entering password...")
-                    await self.page.fill("input[type='password']", password)
-                    
-                    # Click login button
-                    print("Clicking login button...")
-                    await self.page.click(".ds-sign-up-form__register-button")
-                    
-                    # Wait for navigation back to the chat page
-                    await self.page.wait_for_url("https://chat.deepseek.com/")
-                    print("Login successful.")
-                    
+                    await self.page.wait_for_url("https://chat.deepseek.com/", timeout=0)
+                    print("Manual login detected.")
                 except Exception as e:
-                    print(f"Error during auto-login: {e}")
+                    print(f"Error waiting for manual login: {e}")
         else:
             print("Not redirected to sign in. Continuing...")
 

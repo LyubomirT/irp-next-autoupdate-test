@@ -1,12 +1,13 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QListWidget, 
-    QScrollArea, QLabel, QPushButton, QFrame, QMessageBox, QDialog
+    QScrollArea, QLabel, QPushButton, QFrame, QMessageBox, QDialog,
+    QLineEdit
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from config.manager import ConfigManager
 from config.schema import SCHEMA, SettingType
 from .brand import BrandColors
-from .components import Tumbler
+from .components import Tumbler, StyledLineEdit
 from .icons import IconUtils, IconType
 
 class SettingsWindow(QMainWindow):
@@ -176,6 +177,11 @@ class SettingsWindow(QMainWindow):
                 if field.type == SettingType.BOOLEAN:
                     widget = Tumbler()
                     widget.stateChanged.connect(self._on_setting_changed)
+                elif field.type == SettingType.STRING or field.type == SettingType.PASSWORD:
+                    widget = StyledLineEdit()
+                    if field.type == SettingType.PASSWORD:
+                        widget.setEchoMode(QLineEdit.Password)
+                    widget.textChanged.connect(self._on_setting_changed)
                 
                 if widget:
                     widget.setToolTip(field.tooltip or "")
@@ -238,6 +244,21 @@ class SettingsWindow(QMainWindow):
 
         # Select first category by default
         self.category_list.setCurrentRow(0)
+        
+        # Setup dependency tracking
+        self.dependencies = {} # Map "dependency_key" -> list of "dependent_key"
+        for category in SCHEMA:
+            for field in category.fields:
+                if field.depends:
+                    if field.depends not in self.dependencies:
+                        self.dependencies[field.depends] = []
+                    self.dependencies[field.depends].append(f"{category.key}.{field.key}")
+        
+        # Debounce timer for updates
+        self.update_timer = QTimer()
+        self.update_timer.setSingleShot(True)
+        self.update_timer.setInterval(100)
+        self.update_timer.timeout.connect(self._update_dependencies)
 
     def _load_values(self):
         for category in SCHEMA:
@@ -250,11 +271,37 @@ class SettingsWindow(QMainWindow):
                     widget.blockSignals(True)
                     if field.type == SettingType.BOOLEAN:
                         widget.setChecked(bool(value))
+                    elif field.type == SettingType.STRING or field.type == SettingType.PASSWORD:
+                        widget.setText(str(value) if value is not None else "")
                     widget.blockSignals(False)
+        
+        self._update_dependencies()
         self.unsaved_changes = False
 
     def _on_setting_changed(self):
         self.unsaved_changes = True
+        self.update_timer.start()
+
+    def _update_dependencies(self):
+        for dep_key, dependent_keys in self.dependencies.items():
+            dep_widget = self.field_widgets.get(dep_key)
+            if not dep_widget:
+                continue
+                
+            # Determine if dependency is met
+            is_met = False
+            if isinstance(dep_widget, Tumbler):
+                is_met = dep_widget.isChecked()
+            elif isinstance(dep_widget, StyledLineEdit) or isinstance(dep_widget, QLineEdit):
+                is_met = bool(dep_widget.text())
+            
+            # Update dependents
+            for dependent_key in dependent_keys:
+                widget = self.field_widgets.get(dependent_key)
+                if widget:
+                    widget.setEnabled(is_met)
+                    if not is_met and isinstance(widget, StyledLineEdit):
+                        widget.set_error(False) # Clear error if disabled
 
     def _on_category_clicked(self, item):
         self.is_auto_scrolling = True
@@ -318,6 +365,8 @@ class SettingsWindow(QMainWindow):
                     self.category_list.blockSignals(False)
 
     def save_settings(self):
+        validation_errors = []
+        
         for category in SCHEMA:
             for field in category.fields:
                 key = f"{category.key}.{field.key}"
@@ -327,9 +376,49 @@ class SettingsWindow(QMainWindow):
                     value = None
                     if field.type == SettingType.BOOLEAN:
                         value = widget.isChecked()
+                    elif field.type == SettingType.STRING or field.type == SettingType.PASSWORD:
+                        value = widget.text()
+                        
+                        # Check dependencies
+                        is_enabled = True
+                        if field.depends:
+                            dep_widget = self.field_widgets.get(field.depends)
+                            if dep_widget:
+                                if isinstance(dep_widget, Tumbler):
+                                    is_enabled = dep_widget.isChecked()
+                                elif isinstance(dep_widget, StyledLineEdit) or isinstance(dep_widget, QLineEdit):
+                                    is_enabled = bool(dep_widget.text())
+                        
+                        if is_enabled:
+                            # Check required
+                            if field.required and not value:
+                                if isinstance(widget, StyledLineEdit):
+                                    widget.set_error(True)
+                                validation_errors.append(f"{field.label}: This field is required.")
+                            
+                            # Run validator if exists
+                            elif field.validator:
+                                try:
+                                    field.validator(value)
+                                    if isinstance(widget, StyledLineEdit):
+                                        widget.set_error(False)
+                                except ValueError as e:
+                                    if isinstance(widget, StyledLineEdit):
+                                        widget.set_error(True)
+                                    validation_errors.append(f"{field.label}: {str(e)}")
+                        else:
+                            # If disabled, ensure no error state
+                            if isinstance(widget, StyledLineEdit):
+                                widget.set_error(False)
                     
-                    self.config_manager.set_setting(category.key, field.key, value)
+                    if not validation_errors:
+                        self.config_manager.set_setting(category.key, field.key, value)
         
+        if validation_errors:
+            error_msg = "\n".join(validation_errors)
+            QMessageBox.warning(self, "Validation Error", f"Please fix the following errors:\n\n{error_msg}")
+            return
+
         self.config_manager.save_settings()
         self.unsaved_changes = False
         self.settings_saved.emit()

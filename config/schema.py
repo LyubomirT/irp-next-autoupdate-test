@@ -1,11 +1,13 @@
 from enum import Enum
 from dataclasses import dataclass, field
-from typing import List, Any, Optional
+from typing import List, Any, Optional, Callable
+from .validators import validate_email
 
 class SettingType(Enum):
     BOOLEAN = "boolean"
     STRING = "string"
     INTEGER = "integer"
+    PASSWORD = "password"
 
 @dataclass
 class SettingField:
@@ -14,6 +16,9 @@ class SettingField:
     type: SettingType
     default: Any
     tooltip: Optional[str] = None
+    validator: Optional[Callable[[Any], None]] = None
+    required: bool = False
+    depends: Optional[str] = None
 
 @dataclass
 class SettingCategory:
@@ -23,6 +28,38 @@ class SettingCategory:
 
 # Define the schema
 SCHEMA = [
+    SettingCategory(
+        name="Providers & Credentials",
+        key="providers_credentials",
+        fields=[
+            SettingField(
+                key="auto_login",
+                label="Auto Login",
+                type=SettingType.BOOLEAN,
+                default=False,
+                tooltip="Automatically log in using the provided credentials."
+            ),
+            SettingField(
+                key="deepseek_email",
+                label="DeepSeek Email",
+                type=SettingType.STRING,
+                default="",
+                tooltip="Email address for DeepSeek login.",
+                validator=validate_email,
+                required=True,
+                depends="providers_credentials.auto_login"
+            ),
+            SettingField(
+                key="deepseek_password",
+                label="DeepSeek Password",
+                type=SettingType.PASSWORD,
+                default="",
+                tooltip="Password for DeepSeek login.",
+                required=True,
+                depends="providers_credentials.auto_login"
+            ),
+        ]
+    ),
     SettingCategory(
         name="DeepSeek Behavior",
         key="deepseek_behavior",
