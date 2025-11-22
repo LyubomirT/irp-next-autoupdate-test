@@ -21,3 +21,9 @@
 - Likely will use QT-Material for theming the configuration app, but not 100% decided yet.
 - No, not a HTML5 app D: like SillyTavern
 - Stealth probably still Chrome-based (since Patchright is Chrome-based), for FF I'll just recommend Camoufox or similar.
+
+# To contributors
+
+Feel free to open issues or submit PRs, but keep in mind that we don't have a clear roadmap (besides for what's inside my head) and things may change frequently, so contributions may be wasted if they don't align with the final design.
+
+Also, if we do agree on something, just make sure to follow best practices and keep a similar modular structure as the rest of the codebase. Also, please add lots of comments, I throw them in everywhere so it's easier to understand for other contributors (and for myself in the future).
