@@ -10,6 +10,7 @@ from api import API
 from config.manager import ConfigManager
 from ui.settings_window import SettingsWindow
 from ui.brand import BrandColors
+from ui.icons import IconUtils, IconType
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -45,6 +46,7 @@ class MainWindow(QMainWindow):
                 background-color: #4a80e0;
             }}
         """)
+        IconUtils.apply_icon(self.start_button, IconType.START, BrandColors.TEXT_PRIMARY)
         self.start_button.clicked.connect(self.on_start_clicked)
         button_layout.addWidget(self.start_button)
 
@@ -61,6 +63,7 @@ class MainWindow(QMainWindow):
                 background-color: {BrandColors.ITEM_HOVER};
             }}
         """)
+        IconUtils.apply_icon(self.settings_button, IconType.SETTINGS, BrandColors.TEXT_PRIMARY)
         self.settings_button.clicked.connect(self.open_settings)
         button_layout.addWidget(self.settings_button)
         
@@ -117,12 +120,14 @@ class MainWindow(QMainWindow):
             
             self.status_label.setText("Running (Port 8000)")
             self.start_button.setText("Stop")
+            IconUtils.apply_icon(self.start_button, IconType.STOP, BrandColors.TEXT_PRIMARY)
             self.start_button.setEnabled(True)
             
         except Exception as e:
             self.status_label.setText(f"Error: {e}")
             self.start_button.setEnabled(True)
             self.start_button.setText("Start")
+            IconUtils.apply_icon(self.start_button, IconType.START, BrandColors.TEXT_PRIMARY)
             print(f"Error starting services: {e}")
 
     async def stop_services(self):
@@ -141,6 +146,7 @@ class MainWindow(QMainWindow):
                 
             self.status_label.setText("Stopped")
             self.start_button.setText("Start")
+            IconUtils.apply_icon(self.start_button, IconType.START, BrandColors.TEXT_PRIMARY)
             self.start_button.setEnabled(True)
             print("Services stopped.")
         except Exception as e:

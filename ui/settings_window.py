@@ -7,6 +7,7 @@ from config.manager import ConfigManager
 from config.schema import SCHEMA, SettingType
 from .brand import BrandColors
 from .components import Tumbler
+from .icons import IconUtils, IconType
 
 class SettingsWindow(QMainWindow):
     settings_saved = Signal()
@@ -208,6 +209,7 @@ class SettingsWindow(QMainWindow):
                 background-color: {BrandColors.ITEM_HOVER};
             }}
         """)
+        IconUtils.apply_icon(self.cancel_btn, IconType.CANCEL, BrandColors.TEXT_PRIMARY, size=16, y_offset=2)
         self.cancel_btn.clicked.connect(self.close)
         button_layout.addWidget(self.cancel_btn)
         
@@ -227,6 +229,7 @@ class SettingsWindow(QMainWindow):
                 background-color: #4a80e0;
             }}
         """)
+        IconUtils.apply_icon(self.save_btn, IconType.CONFIRM, BrandColors.TEXT_PRIMARY, size=16, y_offset=2)
         self.save_btn.clicked.connect(self.save_settings)
         button_layout.addWidget(self.save_btn)
         

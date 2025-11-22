@@ -1,0 +1,1 @@
+- I'll add semantic icons later, basically generating from our white SVGs using brand-defined colors. By default all SVGs are white, so we can just apply color fills as needed and store them separately. Not needed for now though.

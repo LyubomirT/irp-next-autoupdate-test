@@ -27,3 +27,14 @@
 Feel free to open issues or submit PRs, but keep in mind that we don't have a clear roadmap (besides for what's inside my head) and things may change frequently, so contributions may be wasted if they don't align with the final design.
 
 Also, if we do agree on something, just make sure to follow best practices and keep a similar modular structure as the rest of the codebase. Also, please add lots of comments, I throw them in everywhere so it's easier to understand for other contributors (and for myself in the future).
+
+# Credits (so far)
+
+- Feather Icons (<https://feathericons.com/>) - for the icon set used in the UI
+- Qt6 / PySide6 - for the configuration app framework
+- FastAPI - for the server framework
+- Playwright - for browser automation
+- Patchright - for stealth techniques and ideas
+- SillyTavern - for the actual front-end that will use this backend
+- IntenseRP API (from OmegaSlender) - for the original idea and some code snippets
+- Me for doing all the work :D

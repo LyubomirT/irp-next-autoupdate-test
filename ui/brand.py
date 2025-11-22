@@ -16,6 +16,11 @@ class BrandColors:
     CATEGORY_ACTIVE_BG = "#1a3c78" # Much darker shade of accent
     CATEGORY_ACTIVE_BORDER = "#6b9eff" # Bluer version of accent
     
+    # Semantic Colors
+    SUCCESS = "#5af043" # Green
+    DANGER = "#f04943" # Red
+    WARNING = "#f0c243" # Orange
+    
     # Fonts
     FONT_FAMILY = "Blinker"
     
