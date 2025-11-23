@@ -10,6 +10,7 @@ from deepseek_driver import DeepSeekDriver
 class Message(BaseModel):
     role: str
     content: str
+    name: Optional[str] = None
 
 class ChatCompletionRequest(BaseModel):
     messages: List[Message]
@@ -113,17 +114,10 @@ class API:
             while True:
                 request, response_queue = await self.request_queue.get()
                 try:
-                    # Construct the full message from the messages array
-                    full_prompt = ""
-                    for msg in request.messages:
-                        full_prompt += f"{msg.role}: {msg.content}\n"
-                    
-                    # Remove trailing newline
-                    full_prompt = full_prompt.strip()
-                    
-                    # Call the driver
+                    # Call the driver with the raw messages list
+                    # The driver will handle formatting
                     async for chunk in self.driver.generate_response(
-                        message=full_prompt,
+                        message=request.messages,
                         model=request.model,
                         stream=request.stream,
                         temperature=request.temperature,

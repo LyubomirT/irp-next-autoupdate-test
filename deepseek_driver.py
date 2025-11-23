@@ -2,7 +2,9 @@ import os
 import time
 import json
 import asyncio
+import re
 import httpx
+from typing import List, Union, Any, Dict
 from patchright.async_api import async_playwright, Page, Browser, BrowserContext
 from dotenv import load_dotenv
 
@@ -111,7 +113,7 @@ class DeepSeekDriver:
         self.is_running = False
         print("DeepSeek Driver closed.")
 
-    async def generate_response(self, message: str, model: str = "deepseek-chat", stream: bool = False, temperature: float = None, top_p: float = None):
+    async def generate_response(self, message: Union[str, List[Any]], model: str = "deepseek-chat", stream: bool = False, temperature: float = None, top_p: float = None):
         """
         Generates a response from DeepSeek.
         This function intercepts the network request to support streaming.
@@ -181,7 +183,9 @@ class DeepSeekDriver:
             # Small wait for the UI to update
             await asyncio.sleep(0.5)
             
-            await self._enter_message(message)
+            # Apply formatting logic here
+            formatted_message = self._format_messages(message)
+            await self._enter_message(formatted_message)
             
             # Apply settings before sending
             enable_deepthink = self.config_manager.get_setting("deepseek_behavior", "enable_deepthink")
@@ -207,113 +211,118 @@ class DeepSeekDriver:
             # Cleanup interception
             await self.page.unroute("**/api/v0/chat/completion")
 
-    async def _process_chunk(self, chunk: bytes, queue: asyncio.Queue):
+    def _format_messages(self, messages: Union[str, List[Any]]) -> str:
         """
-        Parses raw bytes from DeepSeek and puts OpenAI-formatted chunks into the queue.
+        Applies formatting rules to the messages.
         """
-        try:
-            text = chunk.decode("utf-8")
-            lines = text.split("\n")
-            for line in lines:
-                if line.startswith("data: "):
-                    data_str = line[6:]
-                    if data_str.strip() == "[DONE]": 
-                        continue
+        apply_formatting = self.config_manager.get_setting("formatting", "apply_formatting")
+        
+        # If formatting is disabled, we still need to convert list to string if it's a list
+        if not apply_formatting:
+            if isinstance(messages, list):
+                # Mimic the previous behavior: role: content if custom formatting is off
+                formatted_parts = []
+                for msg in messages:
+                    role = getattr(msg, "role", msg.get("role") if isinstance(msg, dict) else "")
+                    content = getattr(msg, "content", msg.get("content") if isinstance(msg, dict) else "")
+                    formatted_parts.append(f"{role}: {content}")
+                return "\n".join(formatted_parts)
+            return messages
+
+        # 1. Parse Names
+        user_name = "User"
+        char_name = "Character"
+        
+        msgs_to_scan = messages if isinstance(messages, list) else []
+        
+        # Try Message Objects
+        if self.config_manager.get_setting("formatting", "enable_msg_objects"):
+            for msg in msgs_to_scan:
+                role = getattr(msg, "role", msg.get("role") if isinstance(msg, dict) else "")
+                name = getattr(msg, "name", msg.get("name") if isinstance(msg, dict) else None)
+                if name:
+                    if role == "user":
+                        user_name = name
+                    elif role == "assistant":
+                        char_name = name
+
+        # Try IR2 and Classic (Scan system messages)
+        enable_ir2 = self.config_manager.get_setting("formatting", "enable_ir2")
+        enable_classic = self.config_manager.get_setting("formatting", "enable_classic_irp")
+        
+        if enable_ir2 or enable_classic:
+            for msg in msgs_to_scan:
+                role = getattr(msg, "role", msg.get("role") if isinstance(msg, dict) else "")
+                content = getattr(msg, "content", msg.get("content") if isinstance(msg, dict) else "")
+                
+                if role == "system":
+                    if enable_ir2:
+                        ir2_match = re.search(r"\[\[IR2u\]\](.*?)\[\[/IR2u\]\]-\[\[IR2a\]\](.*?)\[\[/IR2a\]\]", content)
+                        if ir2_match:
+                            user_name = ir2_match.group(1)
+                            char_name = ir2_match.group(2)
                     
-                    try:
-                        data = json.loads(data_str)
-                        # Transform DeepSeek data to OpenAI format
-                        # DeepSeek format based on my findings:
-                        # data: {"v": " content"}
-                        # data: {"v": [{"v": "FINISHED", "p": "status"}, ...]}
-                        # The one below is special for fragments (that's where the first token is)
-                        # data: {"v": [{"v": [{"id": 1, "type": "RESPONSE", "content": "Hello", ...}], "p": "fragments", "o": "APPEND"}], "p": "response", "o": "BATCH"}
-                        
-                        content = ""
-                        finish_reason = None
-                        
-                        if "v" in data:
-                            v = data["v"]
-                            if isinstance(v, str):
-                                content = v
-                            elif isinstance(v, list):
-                                # Check for status or BATCH updates
-                                for item in v:
-                                    if isinstance(item, dict):
-                                        # Check for status update
-                                        if item.get("p") == "status" and item.get("v") == "FINISHED":
-                                            finish_reason = "stop"
-                                        
-                                        # Check for fragments append (first token here)
-                                        # data: {"v": [{"v": [{"id": 1, "type": "THINK", ...}], "p": "fragments", "o": "APPEND"}], ...}
-                                        if item.get("p") == "fragments" and item.get("o") == "APPEND":
-                                            fragments = item.get("v")
-                                            if isinstance(fragments, list):
-                                                for frag in fragments:
-                                                    if isinstance(frag, dict):
-                                                        frag_type = frag.get("type")
-                                                        frag_id = frag.get("id")
-                                                        
-                                                        # Store fragment type
-                                                        if not hasattr(self, "fragment_types"):
-                                                            self.fragment_types = {}
-                                                        self.fragment_types[frag_id] = frag_type
-                                                        
-                                                        # Handle THINK start
-                                                        if frag_type == "THINK" and self.send_deepthink:
-                                                            content += "<think>"
-                                                            self.thinking_active = True
-                                                        
-                                                        # Handle RESPONSE start (end of THINK if active)
-                                                        if frag_type == "RESPONSE" and getattr(self, "thinking_active", False):
-                                                            content += "</think>"
-                                                            self.thinking_active = False
-                                                        
-                                                        if "content" in frag:
-                                                            # Only append content if allowed
-                                                            if frag_type == "THINK":
-                                                                if self.send_deepthink:
-                                                                    content += frag["content"]
-                                                            elif frag_type == "SEARCH":
-                                                                pass # Ignore search content for now
-                                                            else:
-                                                                content += frag["content"]
+                    if enable_classic:
+                        classic_match = re.search(r'DATA1: "(.*?)"\s*DATA2: "(.*?)"', content)
+                        if classic_match:
+                            char_name = classic_match.group(1)
+                            user_name = classic_match.group(2)
 
-                            # Handle path-based updates
-                            # data: {"v": " content", "p": "response/fragments/0/content", "o": "APPEND"}
-                            elif isinstance(v, dict) and "p" in data:
-                                path = data.get("p")
-                                value = data.get("v")
-                                op = data.get("o")
-                                
-                                # Check if it's a fragment content update
-                                if path and path.startswith("response/fragments/"):
-                                    parts = path.split("/")
-                                    if len(parts) >= 4 and parts[3] == "content":
-                                        try:
-                                            frag_index = int(parts[2])
-                                            # fragments: [{"id": 1, "type": "THINK"}] -> index 0
-                                            # fragments: [{"id": 2, "type": "RESPONSE"}] -> index 1
-                                            # So index 0 maps to ID 1.
-                                            
-                                            # Maintain a list of types in order of appearance
-                                            if not hasattr(self, "fragment_type_list"):
-                                                self.fragment_type_list = []
-                                            
-                                            # If we missed the creation (shouldn't happen if sequential), we have a problem.
-                                            pass
-                                        except ValueError:
-                                            pass
-                        
-                        # Let's refine the logic inside the loop
-                        pass
-
-                    except json.JSONDecodeError:
-                        pass
-        except Exception as e:
-            print(f"Error processing chunk: {e}")
+        # 2. Format Messages
+        template = self.config_manager.get_setting("formatting", "formatting_template")
+        divider = self.config_manager.get_setting("formatting", "formatting_divider")
+        # Unescape newline in divider
+        divider = divider.replace("\\n", "\n")
+        
+        formatted_parts = []
+        
+        if isinstance(messages, list):
+            for msg in messages:
+                role_raw = getattr(msg, "role", msg.get("role") if isinstance(msg, dict) else "")
+                content = getattr(msg, "content", msg.get("content") if isinstance(msg, dict) else "")
+                
+                # Get per-message name if available and enabled
+                msg_name = None
+                if self.config_manager.get_setting("formatting", "enable_msg_objects"):
+                    msg_name = getattr(msg, "name", msg.get("name") if isinstance(msg, dict) else None)
+                
+                # Map role
+                display_role = "System"
+                display_name = "System"
+                
+                if role_raw == "user":
+                    display_role = "User"
+                    display_name = msg_name if msg_name else user_name
+                elif role_raw == "assistant":
+                    display_role = "Character"
+                    display_name = msg_name if msg_name else char_name
+                
+                # Apply template
+                part = template.replace("{{name}}", display_name)\
+                               .replace("{{role}}", display_role)\
+                               .replace("{{content}}", content)
+                formatted_parts.append(part)
+        else:
+            # Single string message - treat as User
+            part = template.replace("{{name}}", user_name)\
+                           .replace("{{role}}", "User")\
+                           .replace("{{content}}", messages)
+            formatted_parts.append(part)
             
-    # Redefining _process_chunk completely to be cleaner and use instance state initialized in generate_response
+        final_message = divider.join(formatted_parts)
+        
+        # 3. Injection
+        injection_pos = self.config_manager.get_setting("formatting", "injection_position")
+        injection_content = self.config_manager.get_setting("formatting", "injection_content")
+        
+        if injection_content:
+            if injection_pos == "Before":
+                final_message = injection_content + "\n" + final_message
+            else:
+                final_message = final_message + "\n" + injection_content
+                
+        return final_message
+
     async def _process_chunk(self, chunk: bytes, queue: asyncio.Queue):
         try:
             text = chunk.decode("utf-8")

@@ -106,7 +106,8 @@ class MainWindow(QMainWindow):
             self.api = API(self.driver)
             
             # Configure Uvicorn
-            config = uvicorn.Config(app=self.api.app, host="127.0.0.1", port=8000, log_level="info")
+            config = uvicorn.Config(app=self.api.app, host="127.0.0.1", port=7777, log_level="info")
+            # 7777 for now because 8000 is used by SillyTavern
             self.server = uvicorn.Server(config)
             
             # Start Driver

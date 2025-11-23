@@ -1,13 +1,13 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QListWidget, 
     QScrollArea, QLabel, QPushButton, QFrame, QMessageBox, QDialog,
-    QLineEdit
+    QLineEdit, QTextEdit, QComboBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from config.manager import ConfigManager
 from config.schema import SCHEMA, SettingType
 from .brand import BrandColors
-from .components import Tumbler, StyledLineEdit
+from .components import Tumbler, StyledLineEdit, StyledTextEdit, StyledComboBox, Divider, Description, StyledButton
 from .icons import IconUtils, IconType
 
 class SettingsWindow(QMainWindow):
@@ -159,29 +159,76 @@ class SettingsWindow(QMainWindow):
             
             # Fields
             for field in category.fields:
+                # Handle Divider Type separately as it takes full width
+                if field.type == SettingType.DIVIDER:
+                    widget = Divider(field.label)
+                    card_layout.addWidget(widget)
+                    continue
+                
+                # Handle Description Type separately
+                if field.type == SettingType.DESCRIPTION:
+                    widget = Description(field.default)
+                    card_layout.addWidget(widget)
+                    continue
+
                 field_container = QWidget()
                 field_container.setStyleSheet("background-color: transparent;")
-                field_layout = QHBoxLayout(field_container)
-                field_layout.setContentsMargins(0, 5, 0, 5)
                 
-                # Label
-                label = QLabel(field.label)
-                label.setToolTip(field.tooltip or "")
-                label.setStyleSheet(f"font-size: {BrandColors.FONT_SIZE_LARGE}; color: {BrandColors.TEXT_PRIMARY}; background-color: transparent;")
-                field_layout.addWidget(label)
-                
-                field_layout.addStretch()
-                
-                # Widget based on type
-                widget = None
-                if field.type == SettingType.BOOLEAN:
-                    widget = Tumbler()
-                    widget.stateChanged.connect(self._on_setting_changed)
-                elif field.type == SettingType.STRING or field.type == SettingType.PASSWORD:
-                    widget = StyledLineEdit()
-                    if field.type == SettingType.PASSWORD:
-                        widget.setEchoMode(QLineEdit.Password)
+                # Use VBox for Textarea to give it more space, HBox for others
+                if field.type == SettingType.TEXTAREA:
+                    field_layout = QVBoxLayout(field_container)
+                    field_layout.setContentsMargins(0, 5, 0, 5)
+                    
+                    label = QLabel(field.label)
+                    label.setToolTip(field.tooltip or "")
+                    # Changed color to TEXT_SECONDARY to differentiate from input text
+                    label.setStyleSheet(f"font-size: {BrandColors.FONT_SIZE_LARGE}; color: {BrandColors.TEXT_SECONDARY}; background-color: transparent;")
+                    field_layout.addWidget(label)
+                    
+                    widget = StyledTextEdit()
                     widget.textChanged.connect(self._on_setting_changed)
+                    
+                else:
+                    field_layout = QHBoxLayout(field_container)
+                    field_layout.setContentsMargins(0, 5, 0, 5)
+                    
+                    # Label
+                    label = QLabel(field.label)
+                    label.setToolTip(field.tooltip or "")
+                    # Reverted color to TEXT_PRIMARY for consistency with other fields
+                    label.setStyleSheet(f"font-size: {BrandColors.FONT_SIZE_LARGE}; color: {BrandColors.TEXT_PRIMARY}; background-color: transparent;")
+                    field_layout.addWidget(label)
+                    
+                    field_layout.addStretch()
+                    
+                    # Widget based on type
+                    widget = None
+                    if field.type == SettingType.BOOLEAN:
+                        widget = Tumbler()
+                        widget.stateChanged.connect(self._on_setting_changed)
+                    elif field.type == SettingType.STRING or field.type == SettingType.PASSWORD:
+                        widget = StyledLineEdit()
+                        if field.type == SettingType.PASSWORD:
+                            widget.setEchoMode(QLineEdit.Password)
+                        widget.textChanged.connect(self._on_setting_changed)
+                    elif field.type == SettingType.DROPDOWN:
+                        widget = StyledComboBox()
+                        if field.options:
+                            widget.addItems(field.options)
+                        widget.currentTextChanged.connect(self._on_setting_changed)
+                        
+                        # Specific logic for formatting preset
+                        if field.key == "formatting_preset":
+                            widget.currentTextChanged.connect(self._on_preset_changed)
+                            
+                    elif field.type == SettingType.BUTTON:
+                        widget = StyledButton(field.label)
+                        # use the default value as button text if provided, else label
+                        btn_text = str(field.default) if field.default else field.label
+                        widget.setText(btn_text)
+                        
+                        if field.action == "reset_injection":
+                            widget.clicked.connect(self._reset_injection)
                 
                 if widget:
                     widget.setToolTip(field.tooltip or "")
@@ -273,9 +320,19 @@ class SettingsWindow(QMainWindow):
                         widget.setChecked(bool(value))
                     elif field.type == SettingType.STRING or field.type == SettingType.PASSWORD:
                         widget.setText(str(value) if value is not None else "")
+                    elif field.type == SettingType.TEXTAREA:
+                        widget.setPlainText(str(value) if value is not None else "")
+                    elif field.type == SettingType.DROPDOWN:
+                        if value and value in field.options:
+                            widget.setCurrentText(value)
                     widget.blockSignals(False)
         
         self._update_dependencies()
+        # Trigger preset logic manually after load
+        preset_widget = self.field_widgets.get("formatting.formatting_preset")
+        if preset_widget:
+            self._on_preset_changed(preset_widget.currentText())
+            
         self.unsaved_changes = False
 
     def _on_setting_changed(self):
@@ -294,6 +351,8 @@ class SettingsWindow(QMainWindow):
                 is_met = dep_widget.isChecked()
             elif isinstance(dep_widget, StyledLineEdit) or isinstance(dep_widget, QLineEdit):
                 is_met = bool(dep_widget.text())
+            elif isinstance(dep_widget, StyledComboBox):
+                is_met = bool(dep_widget.currentText())
             
             # Update dependents
             for dependent_key in dependent_keys:
@@ -364,6 +423,42 @@ class SettingsWindow(QMainWindow):
                     self.category_list.setCurrentItem(item)
                     self.category_list.blockSignals(False)
 
+    def _on_preset_changed(self, text):
+        template_widget = self.field_widgets.get("formatting.formatting_template")
+        if not template_widget:
+            return
+
+        if text == "Custom":
+            template_widget.setEnabled(True)
+            # We need to store the custom value temporarily if we switch away from Custom.
+            
+            if hasattr(self, "_last_custom_template"):
+                # Ignoring lint because we know it exists here
+                template_widget.setPlainText(self._last_custom_template)
+                
+        else:
+            # If the widget is enabled, it means we are on Custom (or just started).
+            if template_widget.isEnabled():
+                self._last_custom_template = template_widget.toPlainText()
+            
+            template_widget.setEnabled(False)
+            if text == "Classic":
+                template_widget.setPlainText("{{role}}: {{content}}")
+            elif text == "XML-Like":
+                template_widget.setPlainText("<{{role}}>{{content}}</{{role}}>")
+            elif text == "Divided":
+                template_widget.setPlainText("### {{role}}\n{{content}}")
+
+    def _reset_injection(self):
+        position_widget = self.field_widgets.get("formatting.injection_position")
+        content_widget = self.field_widgets.get("formatting.injection_content")
+        
+        if position_widget:
+            position_widget.setCurrentText("Before")
+        
+        if content_widget:
+            content_widget.setPlainText("[Important Instructions]")
+
     def save_settings(self):
         validation_errors = []
         
@@ -378,38 +473,46 @@ class SettingsWindow(QMainWindow):
                         value = widget.isChecked()
                     elif field.type == SettingType.STRING or field.type == SettingType.PASSWORD:
                         value = widget.text()
+                    elif field.type == SettingType.TEXTAREA:
+                        value = widget.toPlainText()
+                    elif field.type == SettingType.DROPDOWN:
+                        value = widget.currentText()
+                    elif field.type == SettingType.BUTTON or field.type == SettingType.DIVIDER or field.type == SettingType.DESCRIPTION:
+                        continue # These don't have values to save
                         
-                        # Check dependencies
-                        is_enabled = True
-                        if field.depends:
-                            dep_widget = self.field_widgets.get(field.depends)
-                            if dep_widget:
-                                if isinstance(dep_widget, Tumbler):
-                                    is_enabled = dep_widget.isChecked()
-                                elif isinstance(dep_widget, StyledLineEdit) or isinstance(dep_widget, QLineEdit):
-                                    is_enabled = bool(dep_widget.text())
+                    # Check dependencies
+                    is_enabled = True
+                    if field.depends:
+                        dep_widget = self.field_widgets.get(field.depends)
+                        if dep_widget:
+                            if isinstance(dep_widget, Tumbler):
+                                is_enabled = dep_widget.isChecked()
+                            elif isinstance(dep_widget, StyledLineEdit) or isinstance(dep_widget, QLineEdit):
+                                is_enabled = bool(dep_widget.text())
+                            elif isinstance(dep_widget, StyledComboBox):
+                                is_enabled = bool(dep_widget.currentText())
                         
-                        if is_enabled:
-                            # Check required
-                            if field.required and not value:
+                    if is_enabled:
+                        # Check required
+                        if field.required and not value:
+                            if isinstance(widget, StyledLineEdit):
+                                widget.set_error(True)
+                            validation_errors.append(f"{field.label}: This field is required.")
+                        
+                        # Run validator if exists
+                        elif field.validator:
+                            try:
+                                field.validator(value)
+                                if isinstance(widget, StyledLineEdit):
+                                    widget.set_error(False)
+                            except ValueError as e:
                                 if isinstance(widget, StyledLineEdit):
                                     widget.set_error(True)
-                                validation_errors.append(f"{field.label}: This field is required.")
-                            
-                            # Run validator if exists
-                            elif field.validator:
-                                try:
-                                    field.validator(value)
-                                    if isinstance(widget, StyledLineEdit):
-                                        widget.set_error(False)
-                                except ValueError as e:
-                                    if isinstance(widget, StyledLineEdit):
-                                        widget.set_error(True)
-                                    validation_errors.append(f"{field.label}: {str(e)}")
-                        else:
-                            # If disabled, ensure no error state
-                            if isinstance(widget, StyledLineEdit):
-                                widget.set_error(False)
+                                validation_errors.append(f"{field.label}: {str(e)}")
+                    else:
+                        # If disabled, ensure no error state
+                        if isinstance(widget, StyledLineEdit):
+                            widget.set_error(False)
                     
                     if not validation_errors:
                         self.config_manager.set_setting(category.key, field.key, value)

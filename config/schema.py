@@ -1,6 +1,6 @@
 from enum import Enum
 from dataclasses import dataclass, field
-from typing import List, Any, Optional, Callable
+from typing import List, Any, Optional, Callable, Dict
 from .validators import validate_email
 
 class SettingType(Enum):
@@ -8,6 +8,11 @@ class SettingType(Enum):
     STRING = "string"
     INTEGER = "integer"
     PASSWORD = "password"
+    TEXTAREA = "textarea"
+    DROPDOWN = "dropdown"
+    DIVIDER = "divider"
+    DESCRIPTION = "description"
+    BUTTON = "button"
 
 @dataclass
 class SettingField:
@@ -19,6 +24,8 @@ class SettingField:
     validator: Optional[Callable[[Any], None]] = None
     required: bool = False
     depends: Optional[str] = None
+    options: Optional[List[str]] = None # For dropdowns
+    action: Optional[str] = None # For buttons (function name to call)
 
 @dataclass
 class SettingCategory:
@@ -57,6 +64,117 @@ SCHEMA = [
                 tooltip="Password for DeepSeek login.",
                 required=True,
                 depends="providers_credentials.auto_login"
+            ),
+        ]
+    ),
+    SettingCategory(
+        name="Formatting",
+        key="formatting",
+        fields=[
+            SettingField(
+                key="formatting_divider_1",
+                label="Formatting Template",
+                type=SettingType.DIVIDER,
+                default=None
+            ),
+            SettingField(
+                key="formatting_preset",
+                label="Preset",
+                type=SettingType.DROPDOWN,
+                default="Classic",
+                options=["Classic", "XML-Like", "Divided", "Custom"],
+                tooltip="Choose a formatting preset or create your own."
+            ),
+            SettingField(
+                key="formatting_template",
+                label="Template",
+                type=SettingType.TEXTAREA,
+                default="{{role}}: {{content}}",
+                tooltip="Define how messages are formatted. Use {{name}}, {{role}}, and {{content}} placeholders."
+            ),
+            SettingField(
+                key="formatting_divider",
+                label="Divide messages with...",
+                type=SettingType.TEXTAREA,
+                default="\\n",
+                tooltip="String to insert between messages. Default is a newline."
+            ),
+            SettingField(
+                key="apply_formatting",
+                label="Apply Formatting",
+                type=SettingType.BOOLEAN,
+                default=True,
+                tooltip="Toggle whether to apply the formatting rules."
+            ),
+            SettingField(
+                key="formatting_divider_2",
+                label="Name Behavior",
+                type=SettingType.DIVIDER,
+                default=None
+            ),
+            SettingField(
+                key="name_behavior_desc",
+                label="Description",
+                type=SettingType.DESCRIPTION,
+                default="Toggle methods for fetching names. If all fail or are disabled, role names are used. Methods run in order.",
+                tooltip=None
+            ),
+            SettingField(
+                key="enable_msg_objects",
+                label="Message Objects",
+                type=SettingType.BOOLEAN,
+                default=True,
+                tooltip="Scan for 'name' parameter in message objects."
+            ),
+            SettingField(
+                key="enable_ir2",
+                label="IR2 blocks",
+                type=SettingType.BOOLEAN,
+                default=True,
+                tooltip="Parse [[IR2u]]username[[/IR2u]]-[[IR2a]]charname[[/IR2a]] blocks."
+            ),
+            SettingField(
+                key="enable_classic_irp",
+                label="Classic IntenseRP",
+                type=SettingType.BOOLEAN,
+                default=True,
+                tooltip="Parse DATA1: \"{{char}}\" DATA2: \"{{user}}\" blocks."
+            ),
+            SettingField(
+                key="formatting_divider_3",
+                label="Injection",
+                type=SettingType.DIVIDER,
+                default=None
+            ),
+            SettingField(
+                key="injection_desc",
+                label="Description",
+                type=SettingType.DESCRIPTION,
+                default="Insert a small instruction before or after all other messages.",
+                tooltip=None
+            ),
+            SettingField(
+                key="injection_position",
+                label="Position",
+                type=SettingType.DROPDOWN,
+                default="Before",
+                options=["Before", "After"],
+                tooltip="Where to place the injected content."
+            ),
+            SettingField(
+                key="injection_content",
+                label="Content",
+                type=SettingType.TEXTAREA,
+                default="",
+                tooltip="Content to inject."
+            ),
+            SettingField(
+                key="reset_injection_btn",
+                label="Reset to Default",
+                type=SettingType.BUTTON,
+                default="Reset",
+                action="reset_injection",
+                tooltip="Reset injection settings to default."
             ),
         ]
     ),
