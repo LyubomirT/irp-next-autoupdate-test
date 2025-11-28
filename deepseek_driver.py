@@ -354,6 +354,13 @@ class DeepSeekDriver:
         try:
             text = chunk.decode("utf-8")
             lines = text.split("\n")
+            
+            # Cache settings once per chunk processing
+            anti_censorship = self.config_manager.get_setting("deepseek_behavior", "anti_censorship")
+            send_deepthink = self.config_manager.get_setting("deepseek_behavior", "send_deepthink")
+            
+
+            
             for line in lines:
                 if line.startswith("data: "):
                     data_str = line[6:]
@@ -365,163 +372,141 @@ class DeepSeekDriver:
                         content = ""
                         finish_reason = None
                         
-                        # Handle "v" value directly (simple updates) or complex objects
+                        # Normalize updates to a list of operations
+                        ops = []
+                        
                         if "v" in data:
                             v = data["v"]
                             p = data.get("p")
                             o = data.get("o")
                             
-                            # Case 1: Batch update or simple value without path
-                            # or BATCH update for response
+                            # Case 1: Batch update (v is list of ops)
 
                             # ---------------- RYAN!! ----------------
-
                                 # TO RYAN: STOP REMOVING COMMENTS
                                 # I KNOW YOU HATE THEIR COLOR BUT THEY'RE FOR CONTRIBUTORS
                                 # YOU CAN JUST USE A DARK THEME IF IT BOTHERS YOU
-                                
                             # ---------------- RYAN!! ----------------
+
                             if p is None or (p == "response" and o == "BATCH"):
-                                if isinstance(v, str):
-                                    content = v
-                                elif isinstance(v, list):
-                                    # Pre-scan for CONTENT_FILTER if anti-censorship is enabled
-                                    anti_censorship = self.config_manager.get_setting("deepseek_behavior", "anti_censorship")
-                                    if anti_censorship:
-                                        for item in v:
-                                            if isinstance(item, dict) and item.get("p") == "status" and item.get("v") == "CONTENT_FILTER":
-                                                print("Anti-Censorship triggered: Suppressing refusal message.")
-                                                finish_reason = "stop"
-                                                if getattr(self, "thinking_active", False):
-                                                    content += "</think>"
-                                                    self.thinking_active = False
-                                                # Clear the batch to prevent processing any content in it
-                                                v = [] 
-                                                break
-
-                                    # Iterate through batch items
-                                    for item in v:
-                                        if isinstance(item, dict):
-                                            # Status update
-                                            # just a minor change for the future
-                                            # there might be other status values 
-                                            if item.get("p") == "status":
-                                                status_value = item.get("v")
-                                                
-                                                if status_value == "FINISHED":
-                                                    finish_reason = "stop"
-                                                    # Close think tag if open
-                                                    if getattr(self, "thinking_active", False):
-                                                        content += "</think>"
-                                                        self.thinking_active = False
-                                            
-                                            # Fragments append (New Fragment)
-                                            if item.get("p") == "fragments" and item.get("o") == "APPEND":
-                                                fragments = item.get("v")
-                                                if isinstance(fragments, list):
-                                                    for frag in fragments:
-                                                        if isinstance(frag, dict):
-                                                            frag_type = frag.get("type")
-                                                            # Store type by index (len of list before append)
-                                                            if not hasattr(self, "fragment_types_list"):
-                                                                self.fragment_types_list = []
-                                                            self.fragment_types_list.append(frag_type)
-                                                            
-                                                            # Handle THINK start
-                                                            send_deepthink = self.config_manager.get_setting("deepseek_behavior", "send_deepthink")
-                                                            if frag_type == "THINK" and send_deepthink:
-                                                                content += "<think>"
-                                                                self.thinking_active = True
-                                                            
-                                                            # Handle RESPONSE start (end of THINK if active)
-                                                            if frag_type == "RESPONSE" and getattr(self, "thinking_active", False):
-                                                                content += "</think>"
-                                                                self.thinking_active = False
-                                                            
-                                                            # Initial content
-                                                            if "content" in frag:
-                                                                if frag_type == "THINK":
-                                                                    send_deepthink = self.config_manager.get_setting("deepseek_behavior", "send_deepthink")
-                                                                    if send_deepthink:
-                                                                        content += frag["content"]
-                                                                elif frag_type == "SEARCH":
-                                                                    pass
-                                                                else:
-                                                                    content += frag["content"]
-                                                                    
-                                            # Response status update (in batch)
-                                            if item.get("p") == "response" and isinstance(item.get("v"), dict):
-                                                # Check inside response object if needed
-                                                pass
-
-                            # Case 2: Path-based update
+                                if isinstance(v, list):
+                                    ops = v
+                                elif isinstance(v, str):
+                                    # Direct content update (inconsistent here - once I caught this happening but it seems like a bug on their side)
+                                    if getattr(self, "thinking_active", False):
+                                        if send_deepthink:
+                                            content = v
+                                    else:
+                                        content = v
+                            
+                            # Case 2: Single Path-based update
                             else:
-                                # Check for new fragment append: response/fragments
-                                if p == "response/fragments" and o == "APPEND":
-                                    fragments = v
-                                    if isinstance(fragments, list):
-                                        for frag in fragments:
-                                            if isinstance(frag, dict):
-                                                frag_type = frag.get("type")
-                                                frag_id = frag.get("id")
-                                                
-                                                # Store fragment type
-                                                if not hasattr(self, "fragment_types"):
-                                                    self.fragment_types = {}
-                                                self.fragment_types[frag_id] = frag_type
-                                                
-                                                # Store type by index (len of list before append)
-                                                if not hasattr(self, "fragment_types_list"):
-                                                    self.fragment_types_list = []
-                                                self.fragment_types_list.append(frag_type)
-                                                
-                                                # Handle THINK start
-                                                send_deepthink = self.config_manager.get_setting("deepseek_behavior", "send_deepthink")
-                                                if frag_type == "THINK" and send_deepthink:
-                                                    content += "<think>"
-                                                    self.thinking_active = True
-                                                
-                                                # Handle RESPONSE start (end of THINK if active)
-                                                if frag_type == "RESPONSE" and getattr(self, "thinking_active", False):
-                                                    content += "</think>"
-                                                    self.thinking_active = False
-                                                
-                                                # Initial content
-                                                if "content" in frag:
-                                                    if frag_type == "THINK":
-                                                        send_deepthink = self.config_manager.get_setting("deepseek_behavior", "send_deepthink")
-                                                        if send_deepthink:
-                                                            content += frag["content"]
-                                                    elif frag_type == "SEARCH":
-                                                        pass
-                                                    else:
-                                                        content += frag["content"]
+                                ops = [{"p": p, "o": o, "v": v}]
 
-                                # Check for content update: response/fragments/0/content
-                                elif p.startswith("response/fragments/") and p.endswith("/content"):
-                                    try:
-                                        parts = p.split("/")
-                                        index = int(parts[2])
-                                        
-                                        if hasattr(self, "fragment_types_list") and index < len(self.fragment_types_list):
-                                            frag_type = self.fragment_types_list[index]
+                        # Process all operations
+                        should_stop_processing = False
+                        
+                        for item in ops:
+                            if not isinstance(item, dict):
+                                continue
+                                
+                            item_p = item.get("p")
+                            item_o = item.get("o")
+                            item_v = item.get("v")
+                            
+
+
+                            # Check for Anti-Censorship (CONTENT_FILTER)
+                            if anti_censorship:
+                                if item_p == "status" and item_v == "CONTENT_FILTER":
+                                    print("Anti-Censorship triggered: Suppressing refusal message.")
+                                    finish_reason = "stop"
+                                    if getattr(self, "thinking_active", False):
+                                        if send_deepthink:
+                                            content += "</think>"
+                                        self.thinking_active = False
+                                    should_stop_processing = True
+                                    break
+
+                            # Status update
+                            if item_p == "status":
+                                if item_v == "FINISHED":
+                                    finish_reason = "stop"
+                                    # Close think tag if open
+                                    if getattr(self, "thinking_active", False):
+                                        if send_deepthink:
+                                            content += "</think>"
+                                        self.thinking_active = False
+                            
+                            # Fragments append (New Fragment)
+                            # Handle both 'fragments' and 'response/fragments'
+                            elif (item_p == "fragments" or item_p == "response/fragments") and item_o == "APPEND":
+                                fragments = item_v
+                                if isinstance(fragments, list):
+                                    for frag in fragments:
+                                        if isinstance(frag, dict):
+                                            frag_type = frag.get("type")
+                                            # Store type by index (len of list before append)
+                                            if not hasattr(self, "fragment_types_list"):
+                                                self.fragment_types_list = []
+                                            self.fragment_types_list.append(frag_type)
                                             
+
+                                            
+                                            # Handle THINK start
                                             if frag_type == "THINK":
-                                                send_deepthink = self.config_manager.get_setting("deepseek_behavior", "send_deepthink")
                                                 if send_deepthink:
-                                                    content += str(v)
-                                            elif frag_type == "SEARCH":
-                                                pass
-                                            else:
-                                                content += str(v)
-                                    except (ValueError, IndexError):
-                                        pass
+                                                    content += "<think>"
+                                                self.thinking_active = True
+                                            
+                                            # Handle RESPONSE start (end of THINK if active)
+                                            if frag_type == "RESPONSE" and getattr(self, "thinking_active", False):
+                                                if send_deepthink:
+                                                    content += "</think>"
+                                                self.thinking_active = False
+                                            
+                                            # Initial content
+                                            if "content" in frag:
+                                                if frag_type == "THINK":
+                                                    if send_deepthink:
+                                                        content += frag["content"]
+                                                elif frag_type == "SEARCH":
+                                                    pass
+                                                else:
+                                                    content += frag["content"]
+
+                            # Content update: response/fragments/0/content OR fragments/0/content
+                            elif item_p and (item_p.startswith("response/fragments/") or item_p.startswith("fragments/")) and item_p.endswith("/content"):
+                                try:
+                                    parts = item_p.split("/")
+                                    # Index is 2 if response/fragments/0/content, or 1 if fragments/0/content
+                                    if parts[0] == "response":
+                                        index = int(parts[2])
+                                    else:
+                                        index = int(parts[1])
+                                    
+                                    if hasattr(self, "fragment_types_list") and index < len(self.fragment_types_list):
+                                        frag_type = self.fragment_types_list[index]
                                         
-                                # Check for status update: response/fragments/0/status
-                                elif p.startswith("response/fragments/") and p.endswith("/status"):
-                                    if v == "FINISHED":
-                                        # The main closer is the start of RESPONSE or global finish.
+                                        if frag_type == "THINK":
+                                            if send_deepthink:
+                                                content += str(item_v)
+                                        elif frag_type == "SEARCH":
+                                            pass
+                                        else:
+                                            content += str(item_v)
+                                    else:
                                         pass
+                                except (ValueError, IndexError):
+                                    pass
+                                    
+                            # Status update: response/fragments/0/status
+                            elif item_p and (item_p.startswith("response/fragments/") or item_p.startswith("fragments/")) and item_p.endswith("/status"):
+                                if item_v == "FINISHED":
+                                    pass
+
+                        if should_stop_processing:
+                            pass
 
                         if content or finish_reason:
                             openai_chunk = {
