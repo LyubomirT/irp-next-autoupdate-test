@@ -206,10 +206,13 @@ class SettingsWindow(QMainWindow):
                     if field.type == SettingType.BOOLEAN:
                         widget = Tumbler()
                         widget.stateChanged.connect(self._on_setting_changed)
-                    elif field.type == SettingType.STRING or field.type == SettingType.PASSWORD:
+                    elif field.type in [SettingType.STRING, SettingType.PASSWORD, SettingType.INTEGER]:
                         widget = StyledLineEdit()
                         if field.type == SettingType.PASSWORD:
                             widget.setEchoMode(QLineEdit.Password)
+                        elif field.type == SettingType.INTEGER:
+                            from PySide6.QtGui import QIntValidator
+                            widget.setValidator(QIntValidator())
                         widget.textChanged.connect(self._on_setting_changed)
                     elif field.type == SettingType.DROPDOWN:
                         widget = StyledComboBox()
@@ -320,7 +323,7 @@ class SettingsWindow(QMainWindow):
                     widget.blockSignals(True)
                     if field.type == SettingType.BOOLEAN:
                         widget.setChecked(bool(value))
-                    elif field.type == SettingType.STRING or field.type == SettingType.PASSWORD:
+                    elif field.type in [SettingType.STRING, SettingType.PASSWORD, SettingType.INTEGER]:
                         widget.setText(str(value) if value is not None else "")
                     elif field.type == SettingType.TEXTAREA:
                         widget.setPlainText(str(value) if value is not None else "")
@@ -487,11 +490,14 @@ class SettingsWindow(QMainWindow):
                         value = widget.isChecked()
                     elif field.type == SettingType.STRING or field.type == SettingType.PASSWORD:
                         value = widget.text()
+                    elif field.type == SettingType.INTEGER:
+                        text_val = widget.text()
+                        value = int(text_val) if text_val else 0
                     elif field.type == SettingType.TEXTAREA:
                         value = widget.toPlainText()
                     elif field.type == SettingType.DROPDOWN:
                         value = widget.currentText()
-                    elif field.type == SettingType.BUTTON or field.type == SettingType.DIVIDER or field.type == SettingType.DESCRIPTION:
+                    elif field.type in [SettingType.BUTTON, SettingType.DIVIDER, SettingType.DESCRIPTION]:
                         continue # These don't have values to save
                         
                     # Check dependencies

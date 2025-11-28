@@ -216,6 +216,21 @@ SCHEMA = [
                 default=False,
                 tooltip="Toggle the Search button on the DeepSeek interface."
             ),
+            SettingField(
+                key="send_as_text_file",
+                label="Send As Text File",
+                type=SettingType.BOOLEAN,
+                default=False,
+                tooltip="Upload message as a text file instead of typing it."
+            ),
+            SettingField(
+                key="file_upload_timeout",
+                label="File Upload Timeout",
+                type=SettingType.INTEGER,
+                default=15,
+                tooltip="Max seconds to wait for the send button to become enabled after file upload.",
+                depends="deepseek_behavior.send_as_text_file"
+            ),
         ]
     ),
     SettingCategory(

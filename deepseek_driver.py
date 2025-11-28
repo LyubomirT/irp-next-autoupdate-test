@@ -4,6 +4,7 @@ import json
 import asyncio
 import re
 import httpx
+import tempfile
 from typing import List, Union, Any, Dict
 from patchright.async_api import async_playwright, Page, Browser, BrowserContext
 from dotenv import load_dotenv
@@ -185,7 +186,6 @@ class DeepSeekDriver:
             
             # Apply formatting logic here
             formatted_message = self._format_messages(message)
-            await self._enter_message(formatted_message)
             
             # Apply settings before sending
             enable_deepthink = self.config_manager.get_setting("deepseek_behavior", "enable_deepthink")
@@ -194,7 +194,34 @@ class DeepSeekDriver:
             await self.set_deepthink_state(enable_deepthink)
             await self.set_search_state(enable_search)
             
-            await self._send_message()
+            # Small delay for the toggles to take effect
+            await asyncio.sleep(0.5)
+            
+            # Check if we should send as text file
+            send_as_text_file = self.config_manager.get_setting("deepseek_behavior", "send_as_text_file")
+            
+            if send_as_text_file:
+                print("Sending message as text file...")
+                # Create a temporary file
+                with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.txt', encoding='utf-8') as temp_file:
+                    temp_file.write(formatted_message)
+                    temp_file_path = temp_file.name
+                
+                try:
+                    await self._upload_file(temp_file_path)
+                finally:
+                    # Clean up the temporary file
+                    try:
+                        os.remove(temp_file_path)
+                    except OSError:
+                        pass
+                
+                # Get timeout from settings
+                upload_timeout = self.config_manager.get_setting("deepseek_behavior", "file_upload_timeout")
+                await self._send_message(timeout=upload_timeout)
+            else:
+                await self._enter_message(formatted_message)
+                await self._send_message()
             
             # Yield responses from queue
             while True:
@@ -617,11 +644,11 @@ class DeepSeekDriver:
         """
         await self._enter_message(message)
 
-    async def send_message(self):
+    async def send_message(self, timeout: int = None):
         """
         Public wrapper for sending a message.
         """
-        await self._send_message()
+        await self._send_message(timeout=timeout)
 
     async def _enter_message(self, message: str):
         """
@@ -635,15 +662,26 @@ class DeepSeekDriver:
         print(f"Entering message: {message}")
         await textarea.fill(message)
 
-    async def _send_message(self):
+    async def _send_message(self, timeout: int = None):
         """
         Clicks the send button if it is enabled.
+        Waits up to timeout seconds for the button to become enabled.
         """
         # The send button is a div with role="button" and class "ds-icon-button"
         # The send button has a specific hashed class "_7436101"
         send_button = self.page.locator("div.ds-icon-button._7436101")
         
         if await send_button.count() > 0:
+            # If timeout is provided, wait for the button to be enabled
+            if timeout and timeout > 0:
+                print(f"Waiting up to {timeout} seconds for send button to be enabled...")
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    is_disabled = await send_button.get_attribute("aria-disabled") == "true"
+                    if not is_disabled:
+                        break
+                    await asyncio.sleep(0.5)
+            
             is_disabled = await send_button.get_attribute("aria-disabled") == "true"
             if not is_disabled:
                 print("Clicking send button...")
@@ -658,3 +696,22 @@ class DeepSeekDriver:
         Clicks the New Chat button.
         """
         await self.click_new_chat(source="auto")
+
+    async def _upload_file(self, file_path: str):
+        """
+        Uploads a file to the chat.
+        """
+        print(f"Uploading file: {file_path}")
+        
+        # The file input is hidden or styled, but we can target it by type="file"
+        file_input = self.page.locator("input[type='file']")
+        
+        if await file_input.count() > 0:
+            await file_input.set_input_files(file_path)
+            print("File set to input.")
+            
+            # Wait a bit for the upload to be processed by the UI
+            # You might need to wait for a specific indicator that the file is ready
+            await asyncio.sleep(1.0) 
+        else:
+            print("File input not found.")
