@@ -229,6 +229,8 @@ class SettingsWindow(QMainWindow):
                         
                         if field.action == "reset_injection":
                             widget.clicked.connect(self._reset_injection)
+                        elif field.action == "reset_formatting":
+                            widget.clicked.connect(self._reset_formatting)
                 
                 if widget:
                     widget.setToolTip(field.tooltip or "")
@@ -442,12 +444,24 @@ class SettingsWindow(QMainWindow):
                 self._last_custom_template = template_widget.toPlainText()
             
             template_widget.setEnabled(False)
-            if text == "Classic":
+            template_widget.setEnabled(False)
+            if text == "Classic - Name":
+                template_widget.setPlainText("{{name}}: {{content}}")
+            elif text == "Classic - Role":
                 template_widget.setPlainText("{{role}}: {{content}}")
-            elif text == "XML-Like":
+            elif text == "XML-Like - Name":
+                template_widget.setPlainText("<{{name}}>{{content}}</{{name}}>")
+            elif text == "XML-Like - Role":
                 template_widget.setPlainText("<{{role}}>{{content}}</{{role}}>")
-            elif text == "Divided":
+            elif text == "Divided - Name":
+                template_widget.setPlainText("### {{name}}\n{{content}}")
+            elif text == "Divided - Role":
                 template_widget.setPlainText("### {{role}}\n{{content}}")
+
+    def _reset_formatting(self):
+        preset_widget = self.field_widgets.get("formatting.formatting_preset")
+        if preset_widget:
+            preset_widget.setCurrentText("Classic - Name")
 
     def _reset_injection(self):
         position_widget = self.field_widgets.get("formatting.injection_position")

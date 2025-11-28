@@ -2,7 +2,7 @@ import sys
 import asyncio
 import uvicorn
 from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QHBoxLayout
-from PySide6.QtCore import Slot
+from PySide6.QtCore import Slot, Qt
 import qasync
 
 from deepseek_driver import DeepSeekDriver
@@ -47,6 +47,7 @@ class MainWindow(QMainWindow):
             }}
         """)
         IconUtils.apply_icon(self.start_button, IconType.START, BrandColors.TEXT_PRIMARY)
+        self.start_button.setCursor(Qt.PointingHandCursor)
         self.start_button.clicked.connect(self.on_start_clicked)
         button_layout.addWidget(self.start_button)
 
@@ -64,6 +65,7 @@ class MainWindow(QMainWindow):
             }}
         """)
         IconUtils.apply_icon(self.settings_button, IconType.SETTINGS, BrandColors.TEXT_PRIMARY)
+        self.settings_button.setCursor(Qt.PointingHandCursor)
         self.settings_button.clicked.connect(self.open_settings)
         button_layout.addWidget(self.settings_button)
         

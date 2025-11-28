@@ -81,16 +81,29 @@ SCHEMA = [
                 key="formatting_preset",
                 label="Preset",
                 type=SettingType.DROPDOWN,
-                default="Classic",
-                options=["Classic", "XML-Like", "Divided", "Custom"],
+                default="Classic - Name",
+                options=[
+                    "Classic - Name", "Classic - Role", 
+                    "XML-Like - Name", "XML-Like - Role", 
+                    "Divided - Name", "Divided - Role", 
+                    "Custom"
+                ],
                 tooltip="Choose a formatting preset or create your own."
             ),
             SettingField(
                 key="formatting_template",
                 label="Template",
                 type=SettingType.TEXTAREA,
-                default="{{role}}: {{content}}",
+                default="{{name}}: {{content}}",
                 tooltip="Define how messages are formatted. Use {{name}}, {{role}}, and {{content}} placeholders."
+            ),
+            SettingField(
+                key="reset_formatting_btn",
+                label="Reset to Default",
+                type=SettingType.BUTTON,
+                default="Reset",
+                action="reset_formatting",
+                tooltip="Reset formatting template to Classic - Name."
             ),
             SettingField(
                 key="formatting_divider",

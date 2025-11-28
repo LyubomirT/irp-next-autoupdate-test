@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Dict
 from cryptography.fernet import Fernet
 from .schema import SCHEMA, SettingType
+from .migrator import SettingsMigrator
 
 class ConfigManager:
     def __init__(self, config_dir: str = "config_data"):
@@ -41,6 +42,9 @@ class ConfigManager:
             
             decrypted_data = self.cipher.decrypt(encrypted_data)
             self.settings = json.loads(decrypted_data.decode("utf-8"))
+            
+            # Migrate settings
+            self.settings = SettingsMigrator.migrate(self.settings)
             
             # Validate/Merge with schema to ensure all fields exist
             self._merge_defaults()
