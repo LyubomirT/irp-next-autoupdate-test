@@ -1,0 +1,3 @@
+- [ ] Add a logger
+- [ ] Add better support for message stopping (if the client aborts the request, we abort generation)
+- [ ] Add a process watcher to alert the main app if the browser process crashes
