@@ -78,9 +78,11 @@ class MainWindow(QMainWindow):
 
     def open_settings(self):
         if not self.settings_window:
-            self.settings_window = SettingsWindow(self.config_manager, self)
+            # Pass None as parent to make it a top-level window with its own taskbar icon
+            self.settings_window = SettingsWindow(self.config_manager, None)
             self.settings_window.settings_saved.connect(self.on_settings_saved)
         self.settings_window.show()
+        self.settings_window.activateWindow() # Bring to front
 
     def on_settings_saved(self):
         print("Settings saved.")
@@ -175,6 +177,11 @@ class MainWindow(QMainWindow):
             # We need to call close again, but bypass this check
             # We can reset the status label
             self.status_label.setText("Stopped")
+            
+            # Close settings window if open
+            if self.settings_window:
+                self.settings_window.close()
+                
             self.close()
             
         asyncio.create_task(cleanup_and_close())
