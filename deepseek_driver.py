@@ -373,20 +373,47 @@ class DeepSeekDriver:
                             
                             # Case 1: Batch update or simple value without path
                             # or BATCH update for response
+
+                            # ---------------- RYAN!! ----------------
+
+                                # TO RYAN: STOP REMOVING COMMENTS
+                                # I KNOW YOU HATE THEIR COLOR BUT THEY'RE FOR CONTRIBUTORS
+                                # YOU CAN JUST USE A DARK THEME IF IT BOTHERS YOU
+                                
+                            # ---------------- RYAN!! ----------------
                             if p is None or (p == "response" and o == "BATCH"):
                                 if isinstance(v, str):
                                     content = v
                                 elif isinstance(v, list):
+                                    # Pre-scan for CONTENT_FILTER if anti-censorship is enabled
+                                    anti_censorship = self.config_manager.get_setting("deepseek_behavior", "anti_censorship")
+                                    if anti_censorship:
+                                        for item in v:
+                                            if isinstance(item, dict) and item.get("p") == "status" and item.get("v") == "CONTENT_FILTER":
+                                                print("Anti-Censorship triggered: Suppressing refusal message.")
+                                                finish_reason = "stop"
+                                                if getattr(self, "thinking_active", False):
+                                                    content += "</think>"
+                                                    self.thinking_active = False
+                                                # Clear the batch to prevent processing any content in it
+                                                v = [] 
+                                                break
+
                                     # Iterate through batch items
                                     for item in v:
                                         if isinstance(item, dict):
                                             # Status update
-                                            if item.get("p") == "status" and item.get("v") == "FINISHED":
-                                                finish_reason = "stop"
-                                                # Close think tag if open
-                                                if getattr(self, "thinking_active", False):
-                                                    content += "</think>"
-                                                    self.thinking_active = False
+                                            # just a minor change for the future
+                                            # there might be other status values 
+                                            if item.get("p") == "status":
+                                                status_value = item.get("v")
+                                                
+                                                if status_value == "FINISHED":
+                                                    finish_reason = "stop"
+                                                    # Close think tag if open
+                                                    if getattr(self, "thinking_active", False):
+                                                        content += "</think>"
+                                                        self.thinking_active = False
                                             
                                             # Fragments append (New Fragment)
                                             if item.get("p") == "fragments" and item.get("o") == "APPEND":

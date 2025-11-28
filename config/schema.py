@@ -231,6 +231,13 @@ SCHEMA = [
                 tooltip="Max seconds to wait for the send button to become enabled after file upload.",
                 depends="deepseek_behavior.send_as_text_file"
             ),
+            SettingField(
+                key="anti_censorship",
+                label="Anti-Censorship",
+                type=SettingType.BOOLEAN,
+                default=False,
+                tooltip="If enabled, suppresses the 'Sorry, that's beyond my current scope' message when content filtering is triggered."
+            ),
         ]
     ),
     SettingCategory(
