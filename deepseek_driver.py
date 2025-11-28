@@ -8,6 +8,7 @@ import tempfile
 from typing import List, Union, Any, Dict
 from patchright.async_api import async_playwright, Page, Browser, BrowserContext
 from dotenv import load_dotenv
+from utils.cache_manager import CacheManager
 
 load_dotenv()
 
@@ -18,7 +19,9 @@ class DeepSeekDriver:
         self.browser: Browser = None
         self.context: BrowserContext = None
         self.page: Page = None
+        self.page: Page = None
         self.is_running = False
+        self.cache_manager = CacheManager()
 
     async def start(self):
         """
@@ -44,6 +47,10 @@ class DeepSeekDriver:
         await self.login()
         
         self.is_running = True
+        
+        # Invalidate cache on start
+        self.cache_manager.clear_cache("last_message.txt")
+        
         print("DeepSeek Driver started successfully.")
 
     async def login(self):
@@ -176,52 +183,74 @@ class DeepSeekDriver:
 
         # Set up interception
         await self.page.route("**/api/v0/chat/completion", handle_route)
+        await self.page.route("**/api/v0/chat/regenerate", handle_route)
         
         try:
-            # Trigger UI interaction
-            # Clear previous chat by clicking New Chat
-            await self._click_new_chat()
-            # Small wait for the UI to update
-            await asyncio.sleep(0.5)
-            
-            # Apply formatting logic here
+            # Apply formatting
             formatted_message = self._format_messages(message)
             
-            # Apply settings before sending
-            enable_deepthink = self.config_manager.get_setting("deepseek_behavior", "enable_deepthink")
-            enable_search = self.config_manager.get_setting("deepseek_behavior", "enable_search")
+            # Check for Clean Regeneration
+            clean_regeneration = self.config_manager.get_setting("deepseek_behavior", "clean_regeneration")
+            regenerated = False
             
-            await self.set_deepthink_state(enable_deepthink)
-            await self.set_search_state(enable_search)
+            if clean_regeneration:
+                last_message = self.cache_manager.read_cache("last_message.txt")
+                if last_message == formatted_message:
+                    print("Clean Regeneration: Message matches cache. Attempting to regenerate...")
+                    if await self._click_regenerate():
+                        print("Clean Regeneration: Button clicked. Regenerating...")
+                        regenerated = True
+                    else:
+                        print("Clean Regeneration: Button not found or disabled. Falling back to new chat.")
+                else:
+                    print("Clean Regeneration: Message differs from cache. Creating new chat.")
             
-            # Small delay for the toggles to take effect
-            await asyncio.sleep(0.5)
-            
-            # Check if we should send as text file
-            send_as_text_file = self.config_manager.get_setting("deepseek_behavior", "send_as_text_file")
-            
-            if send_as_text_file:
-                print("Sending message as text file...")
-                # Create a temporary file
-                with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.txt', encoding='utf-8') as temp_file:
-                    temp_file.write(formatted_message)
-                    temp_file_path = temp_file.name
+            if not regenerated:
+                # Trigger UI interaction
+                # Clear previous chat by clicking New Chat
+                await self._click_new_chat()
+                # Small wait for the UI to update
+                await asyncio.sleep(0.5)
                 
-                try:
-                    await self._upload_file(temp_file_path)
-                finally:
-                    # Clean up the temporary file
+                # Apply settings before sending
+                enable_deepthink = self.config_manager.get_setting("deepseek_behavior", "enable_deepthink")
+                enable_search = self.config_manager.get_setting("deepseek_behavior", "enable_search")
+                
+                await self.set_deepthink_state(enable_deepthink)
+                await self.set_search_state(enable_search)
+                
+                # Small delay for the toggles to take effect
+                await asyncio.sleep(0.5)
+                
+                # Check if we should send as text file
+                send_as_text_file = self.config_manager.get_setting("deepseek_behavior", "send_as_text_file")
+                
+                if send_as_text_file:
+                    print("Sending message as text file...")
+                    # Create a temporary file
+                    with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.txt', encoding='utf-8') as temp_file:
+                        temp_file.write(formatted_message)
+                        temp_file_path = temp_file.name
+                    
                     try:
-                        os.remove(temp_file_path)
-                    except OSError:
-                        pass
+                        await self._upload_file(temp_file_path)
+                    finally:
+                        # Clean up the temporary file
+                        try:
+                            os.remove(temp_file_path)
+                        except OSError:
+                            pass
+                    
+                    # Get timeout from settings
+                    upload_timeout = self.config_manager.get_setting("deepseek_behavior", "file_upload_timeout")
+                    await self._send_message(timeout=upload_timeout)
+                else:
+                    await self._enter_message(formatted_message)
+                    await self._send_message()
                 
-                # Get timeout from settings
-                upload_timeout = self.config_manager.get_setting("deepseek_behavior", "file_upload_timeout")
-                await self._send_message(timeout=upload_timeout)
-            else:
-                await self._enter_message(formatted_message)
-                await self._send_message()
+                # Update cache
+                if clean_regeneration:
+                    self.cache_manager.write_cache("last_message.txt", formatted_message)
             
             # Yield responses from queue
             while True:
@@ -237,6 +266,7 @@ class DeepSeekDriver:
         finally:
             # Cleanup interception
             await self.page.unroute("**/api/v0/chat/completion")
+            await self.page.unroute("**/api/v0/chat/regenerate")
 
     def _format_messages(self, messages: Union[str, List[Any]]) -> str:
         """
@@ -708,6 +738,35 @@ class DeepSeekDriver:
         Clicks the New Chat button.
         """
         await self.click_new_chat(source="auto")
+
+    async def _click_regenerate(self) -> bool:
+        """
+        Clicks the regenerate button.
+        Returns True if successful, False otherwise.
+        """
+        # Selector based on my investigation: within ds-flex _965abe9 _54866f7, it's the second button
+        # The container has classes _965abe9 and _54866f7
+        container_selector = "div.ds-flex._965abe9._54866f7"
+        
+        # We need the second button inside this container
+        # The buttons are div.ds-icon-button
+        button_selector = f"{container_selector} >> div.ds-icon-button >> nth=1"
+        
+        button = self.page.locator(button_selector)
+        
+        if await button.count() > 0:
+            # Check if disabled
+            is_disabled = await button.get_attribute("aria-disabled") == "true"
+            if is_disabled:
+                print("Regenerate button is disabled (likely due to censorship).")
+                return False
+            
+            print("Clicking regenerate button...")
+            await button.click()
+            return True
+        else:
+            print("Regenerate button not found.")
+            return False
 
     async def _upload_file(self, file_path: str):
         """

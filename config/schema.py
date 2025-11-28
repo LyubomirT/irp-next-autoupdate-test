@@ -238,6 +238,13 @@ SCHEMA = [
                 default=False,
                 tooltip="If enabled, suppresses the 'Sorry, that's beyond my current scope' message when content filtering is triggered."
             ),
+            SettingField(
+                key="clean_regeneration",
+                label="Clean Regeneration",
+                type=SettingType.BOOLEAN,
+                default=False,
+                tooltip="If enabled, attempts to regenerate the last message instead of creating a new chat if the prompt is identical."
+            ),
         ]
     ),
     SettingCategory(
