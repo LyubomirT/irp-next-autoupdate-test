@@ -24,6 +24,10 @@ class DeepSeekDriver:
         self.cache_manager = CacheManager()
         self.on_crash_callback = None
         self.monitoring_active = False
+        
+        # Abort handling
+        self.current_abort_event: asyncio.Event = None
+        self.abort_requested = False
 
     async def start(self):
         """
@@ -128,7 +132,7 @@ class DeepSeekDriver:
         self.is_running = False
         print("DeepSeek Driver closed.")
 
-    async def generate_response(self, message: Union[str, List[Any]], model: str = "deepseek-chat", stream: bool = False, temperature: float = None, top_p: float = None):
+    async def generate_response(self, message: Union[str, List[Any]], model: str = "deepseek-chat", stream: bool = False, temperature: float = None, top_p: float = None, abort_event: asyncio.Event = None):
         """
         Generates a response from DeepSeek.
         This function intercepts the network request to support streaming.
@@ -138,6 +142,8 @@ class DeepSeekDriver:
         # Reset state for new generation
         self.fragment_types_list = []
         self.thinking_active = False
+        self.abort_requested = False
+        self.current_abort_event = abort_event
         
         async def handle_route(route):
             request = route.request
@@ -160,23 +166,47 @@ class DeepSeekDriver:
             # But we could modify it here if needed
             full_response_body = b""
             response_headers = {}
+            aborted = False
             
-            async with httpx.AsyncClient() as client:
-                try:
-                    async with client.stream("POST", request.url, headers=headers, cookies=cookie_dict, json=post_data, timeout=60.0) as response:
-                        # Capture headers to forward them later
-                        # We specifically need Content-Type so the frontend knows it's an SSE stream
-                        for k, v in response.headers.items():
-                            response_headers[k] = v
+            try:
+                async with httpx.AsyncClient() as client:
+                    try:
+                        async with client.stream("POST", request.url, headers=headers, cookies=cookie_dict, json=post_data, timeout=60.0) as response:
+                            # Capture headers to forward them later
+                            # We specifically need Content-Type so the frontend knows it's an SSE stream
+                            for k, v in response.headers.items():
+                                response_headers[k] = v
                             
-                        async for chunk in response.aiter_bytes():
-                            full_response_body += chunk
-                            # Process chunk for streaming
-                            await self._process_chunk(chunk, response_queue)
-                            
-                except Exception as e:
-                    print(f"Error during intercepted request: {e}")
-                    await response_queue.put({"error": str(e)})
+                            async for chunk in response.aiter_bytes():
+                                # Check if abort was requested
+                                if self.abort_requested or (abort_event and abort_event.is_set()):
+                                    print("Abort detected during streaming, stopping...")
+                                    aborted = True
+                                    break
+                                
+                                full_response_body += chunk
+                                # Process chunk for streaming
+                                await self._process_chunk(chunk, response_queue)
+                                
+                    except httpx.ReadError as e:
+                        if not aborted and not self.abort_requested:
+                            print(f"Read error during intercepted request: {e}")
+                            await response_queue.put({"error": str(e)})
+                    except Exception as e:
+                        if not aborted and not self.abort_requested:
+                            print(f"Error during intercepted request: {e}")
+                            await response_queue.put({"error": str(e)})
+            except RuntimeError as e:
+                # Ignore RuntimeError from async generator cleanup during abort
+                if "async generator" in str(e) or "cancel scope" in str(e):
+                    print(f"Ignored expected error during abort: {e}")
+                else:
+                    raise
+            
+            # If aborted, click the stop button in DeepSeek UI
+            if aborted or self.abort_requested:
+                print("Request was aborted, clicking Stop button...")
+                await self._click_stop_button()
             
             # Fulfill the original request so the UI updates
             try:
@@ -261,6 +291,11 @@ class DeepSeekDriver:
             
             # Yield responses from queue
             while True:
+                # Check for abort before waiting for next item
+                if self.abort_requested or (abort_event and abort_event.is_set()):
+                    print("Abort detected in response loop, breaking...")
+                    break
+                    
                 item = await response_queue.get()
                 if item is None:
                     break
@@ -272,8 +307,52 @@ class DeepSeekDriver:
                 
         finally:
             # Cleanup interception
+            self.current_abort_event = None
+            self.abort_requested = False
             await self.page.unroute("**/api/v0/chat/completion")
             await self.page.unroute("**/api/v0/chat/regenerate")
+
+    async def abort_generation(self):
+        """
+        Aborts the current generation request.
+        Called by the API when client disconnects.
+        """
+        print("Abort generation requested...")
+        self.abort_requested = True
+        if self.current_abort_event:
+            self.current_abort_event.set()
+        # Click the stop button in DeepSeek UI
+        await self._click_stop_button()
+
+    async def _click_stop_button(self):
+        """
+        Clicks the Stop button in DeepSeek UI to cancel the ongoing generation.
+        The Stop button appears in place of the Send button during generation.
+        """
+        try:
+            # The send button doesn't have a specific class when it's in "stop" mode
+            # It's the same location as the send button but with different styling
+            
+            # First, try the specific stop button selector
+            stop_button = self.page.locator("div.ds-icon-button._7436101")
+            
+            if await stop_button.count() > 0:
+                # Check if the button is in "stop" mode (enabled and clickable)
+                is_disabled = await stop_button.get_attribute("aria-disabled")
+                if is_disabled != "true":
+                    print("Clicking Stop button...")
+                    await stop_button.click()
+                    print("Stop button clicked successfully.")
+                    return True
+                else:
+                    print("Stop button is disabled (generation may have already stopped).")
+            else:
+                print("Stop button not found.")
+                
+            return False
+        except Exception as e:
+            print(f"Error clicking stop button: {e}")
+            return False
 
     async def _monitor_browser_loop(self):
         """
