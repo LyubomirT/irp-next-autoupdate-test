@@ -106,6 +106,7 @@ class MainWindow(QMainWindow):
         try:
             # Pass config manager to driver
             self.driver = DeepSeekDriver(self.config_manager)
+            self.driver.on_crash_callback = self.on_browser_crashed
             
             self.api = API(self.driver)
             
@@ -159,12 +160,47 @@ class MainWindow(QMainWindow):
             self.status_label.setText(f"Error stopping: {e}")
             self.start_button.setEnabled(True)
 
+    async def on_browser_crashed(self):
+        """
+        Callback for when the browser crashes or is closed manually.
+        """
+        print("Browser crash callback received.")
+        self.status_label.setText("Browser Closed/Crashed")
+        
+        # We need to clean up all services including playwright
+        try:
+            if self.api:
+                await self.api.stop()
+                
+            if self.server:
+                self.server.should_exit = True
+                if hasattr(self, 'server_task'):
+                    await self.server_task
+            
+            # The driver's close() method handles None checks for context/browser, theoretically that is enough
+            if self.driver:
+                try:
+                    await self.driver.close()
+                except Exception as e:
+                    print(f"Error closing driver after crash: {e}")
+                self.driver = None
+            
+            # Reset UI
+            self.start_button.setText("Start")
+            IconUtils.apply_icon(self.start_button, IconType.START, BrandColors.TEXT_PRIMARY)
+            self.start_button.setEnabled(True)
+            
+        except Exception as e:
+            print(f"Error handling crash cleanup: {e}")
+            self.status_label.setText(f"Error: {e}")
+            self.start_button.setEnabled(True)
+
     def closeEvent(self, event):
         # Cleanup on close
         print("Window closing, shutting down...")
         # qasync loop runs until the window closes usually, but we need to await the cleanup.
         
-        if self.status_label.text() == "Stopped" or self.status_label.text() == "Ready":
+        if self.status_label.text() in ["Stopped", "Ready", "Browser Closed/Crashed"]:
             event.accept()
             return
 

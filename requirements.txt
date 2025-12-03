@@ -8,3 +8,4 @@ patchright
 python-dotenv
 httpx
 cryptography
+psutil

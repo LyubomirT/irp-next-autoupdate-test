@@ -22,6 +22,8 @@ class DeepSeekDriver:
         self.page: Page = None
         self.is_running = False
         self.cache_manager = CacheManager()
+        self.on_crash_callback = None
+        self.monitoring_active = False
 
     async def start(self):
         """
@@ -52,6 +54,10 @@ class DeepSeekDriver:
         self.cache_manager.clear_cache("last_message.txt")
         
         print("DeepSeek Driver started successfully.")
+        
+        # Start monitoring loop
+        self.monitoring_active = True
+        asyncio.create_task(self._monitor_browser_loop())
 
     async def login(self):
         """
@@ -112,6 +118,7 @@ class DeepSeekDriver:
         Closes the browser and playwright.
         """
         print("Closing DeepSeek Driver...")
+        self.monitoring_active = False
         if self.context:
             await self.context.close()
         if self.browser:
@@ -267,6 +274,54 @@ class DeepSeekDriver:
             # Cleanup interception
             await self.page.unroute("**/api/v0/chat/completion")
             await self.page.unroute("**/api/v0/chat/regenerate")
+
+    async def _monitor_browser_loop(self):
+        """
+        Periodically checks if the browser is still open.
+        """
+        print("Starting browser monitoring loop...")
+        while self.monitoring_active:
+            try:
+                if not self.browser or not self.browser.is_connected():
+                    print("Browser disconnected!")
+                    await self._handle_crash()
+                    break
+                
+                if not self.page or self.page.is_closed():
+                    print("Page closed!")
+                    await self._handle_crash()
+                    break
+                    
+                # Also check if context is closed
+                if not self.context or len(self.context.pages) == 0:
+                     # Sometimes page.is_closed() isn't enough if the whole context is gone
+                    print("Context has no pages or is closed!")
+                    await self._handle_crash()
+                    break
+
+            except Exception as e:
+                print(f"Error in monitoring loop: {e}")
+                # If we can't check, assume it's gone or something is wrong
+                pass
+            
+            await asyncio.sleep(2.0)
+            
+    async def _handle_crash(self):
+        """
+        Handles the crash event.
+        """
+        if not self.monitoring_active:
+            return
+
+        print("Browser crash detected!")
+        self.is_running = False
+        self.monitoring_active = False
+        
+        if self.on_crash_callback:
+            if asyncio.iscoroutinefunction(self.on_crash_callback):
+                await self.on_crash_callback()
+            else:
+                self.on_crash_callback()
 
     def _format_messages(self, messages: Union[str, List[Any]]) -> str:
         """
