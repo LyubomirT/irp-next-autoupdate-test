@@ -2,6 +2,7 @@ from enum import Enum
 import os
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QAbstractButton
+from utils.logger import Logger
 
 class IconType(Enum):
     START = "play.svg"
@@ -24,7 +25,7 @@ class IconUtils:
         file_path = os.path.join(base_path, icon_type.value)
         
         if not os.path.exists(file_path):
-            print(f"Warning: Icon file not found: {file_path}")
+            Logger.warning(f"Icon file not found: {file_path}")
             return
 
         # Use QIcon directly to let Qt handle HiDPI scaling and rendering

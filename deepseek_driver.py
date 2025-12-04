@@ -9,6 +9,7 @@ from typing import List, Union, Any, Dict
 from patchright.async_api import async_playwright, Page, Browser, BrowserContext
 from dotenv import load_dotenv
 from utils.cache_manager import CacheManager
+from utils.logger import Logger
 
 load_dotenv()
 
@@ -33,11 +34,11 @@ class DeepSeekDriver:
         """
         Starts the browser and navigates to DeepSeek.
         """
-        print("Starting DeepSeek Driver...")
+        Logger.info("Starting DeepSeek Driver...")
         self.playwright = await async_playwright().start()
         # Launch Chromium
         # headless=False to see the browser
-        print("Launching Chromium...")
+        Logger.info("Launching Chromium...")
         self.browser = await self.playwright.chromium.launch(headless=False)
         
         # Create a new context
@@ -46,7 +47,7 @@ class DeepSeekDriver:
         # Create a new page
         self.page = await self.context.new_page()
         
-        print("Navigating to https://chat.deepseek.com/ ...")
+        Logger.info("Navigating to https://chat.deepseek.com/ ...")
         await self.page.goto("https://chat.deepseek.com/")
         
         # Handle Login
@@ -57,7 +58,7 @@ class DeepSeekDriver:
         # Invalidate cache on start
         self.cache_manager.clear_cache("last_message.txt")
         
-        print("DeepSeek Driver started successfully.")
+        Logger.success("DeepSeek Driver started successfully.")
         
         # Start monitoring loop
         self.monitoring_active = True
@@ -69,19 +70,19 @@ class DeepSeekDriver:
         """
         # Check if we were redirected to sign in
         if "sign_in" in self.page.url:
-            print("Redirected to sign in page.")
+            Logger.info("Redirected to sign in page.")
             
             auto_login = self.config_manager.get_setting("providers_credentials", "auto_login")
             
             if auto_login:
-                print("Auto-login enabled. Attempting to log in...")
+                Logger.info("Auto-login enabled. Attempting to log in...")
                 
                 # Get credentials from settings
                 email = self.config_manager.get_setting("providers_credentials", "deepseek_email")
                 password = self.config_manager.get_setting("providers_credentials", "deepseek_password")
                 
                 if not email or not password:
-                    print("Error: DeepSeek email or password not found in settings.")
+                    Logger.error("DeepSeek email or password not found in settings.")
                     return
                 else:
                     try:
@@ -89,39 +90,39 @@ class DeepSeekDriver:
                         await self.page.wait_for_selector(".ds-sign-up-form__main")
                         
                         # Fill email
-                        print(f"Entering email: {email}")
+                        Logger.debug(f"Entering email: {email}")
                         await self.page.fill("input[type='text']", email)
                         
                         # Fill password
-                        print("Entering password...")
+                        Logger.debug("Entering password...")
                         await self.page.fill("input[type='password']", password)
                         
                         # Click login button
-                        print("Clicking login button...")
+                        Logger.debug("Clicking login button...")
                         await self.page.click(".ds-sign-up-form__register-button")
                         
                         # Wait for navigation back to the chat page
                         await self.page.wait_for_url("https://chat.deepseek.com/")
-                        print("Login successful.")
+                        Logger.success("Login successful.")
                         
                     except Exception as e:
-                        print(f"Error during auto-login: {e}")
+                        Logger.error(f"Error during auto-login: {e}")
             else:
-                print("Auto-login disabled. Waiting for manual login...")
+                Logger.info("Auto-login disabled. Waiting for manual login...")
                 # Wait indefinitely (or until closed) for the user to log in and reach the chat page
                 try:
                     await self.page.wait_for_url("https://chat.deepseek.com/", timeout=0)
-                    print("Manual login detected.")
+                    Logger.success("Manual login detected.")
                 except Exception as e:
-                    print(f"Error waiting for manual login: {e}")
+                    Logger.error(f"Error waiting for manual login: {e}")
         else:
-            print("Not redirected to sign in. Continuing...")
+            Logger.info("Not redirected to sign in. Continuing...")
 
     async def close(self):
         """
         Closes the browser and playwright.
         """
-        print("Closing DeepSeek Driver...")
+        Logger.info("Closing DeepSeek Driver...")
         self.monitoring_active = False
         if self.context:
             await self.context.close()
@@ -130,7 +131,7 @@ class DeepSeekDriver:
         if self.playwright:
             await self.playwright.stop()
         self.is_running = False
-        print("DeepSeek Driver closed.")
+        Logger.info("DeepSeek Driver closed.")
 
     async def generate_response(self, message: Union[str, List[Any]], model: str = "deepseek-chat", stream: bool = False, temperature: float = None, top_p: float = None, abort_event: asyncio.Event = None):
         """
@@ -147,7 +148,7 @@ class DeepSeekDriver:
         
         async def handle_route(route):
             request = route.request
-            print(f"Intercepted request to: {request.url}")
+            Logger.debug(f"Intercepted request to: {request.url}")
             
             # Prepare headers and cookies
             headers = await request.all_headers()
@@ -180,7 +181,7 @@ class DeepSeekDriver:
                             async for chunk in response.aiter_bytes():
                                 # Check if abort was requested
                                 if self.abort_requested or (abort_event and abort_event.is_set()):
-                                    print("Abort detected during streaming, stopping...")
+                                    Logger.debug("Abort detected during streaming, stopping...")
                                     aborted = True
                                     break
                                 
@@ -190,22 +191,22 @@ class DeepSeekDriver:
                                 
                     except httpx.ReadError as e:
                         if not aborted and not self.abort_requested:
-                            print(f"Read error during intercepted request: {e}")
+                            Logger.error(f"Read error during intercepted request: {e}")
                             await response_queue.put({"error": str(e)})
                     except Exception as e:
                         if not aborted and not self.abort_requested:
-                            print(f"Error during intercepted request: {e}")
+                            Logger.error(f"Error during intercepted request: {e}")
                             await response_queue.put({"error": str(e)})
             except RuntimeError as e:
                 # Ignore RuntimeError from async generator cleanup during abort
                 if "async generator" in str(e) or "cancel scope" in str(e):
-                    print(f"Ignored expected error during abort: {e}")
+                    Logger.debug(f"Ignored expected error during abort: {e}")
                 else:
                     raise
             
             # If aborted, click the stop button in DeepSeek UI
             if aborted or self.abort_requested:
-                print("Request was aborted, clicking Stop button...")
+                Logger.debug("Request was aborted, clicking Stop button...")
                 await self._click_stop_button()
             
             # Fulfill the original request so the UI updates
@@ -213,7 +214,7 @@ class DeepSeekDriver:
                 # Forward the captured headers, especially Content-Type
                 await route.fulfill(body=full_response_body, status=200, headers=response_headers)
             except Exception as e:
-                print(f"Error fulfilling route: {e}")
+                Logger.error(f"Error fulfilling route: {e}")
             
             # Signal end of stream
             await response_queue.put(None)
@@ -233,14 +234,14 @@ class DeepSeekDriver:
             if clean_regeneration:
                 last_message = self.cache_manager.read_cache("last_message.txt")
                 if last_message == formatted_message:
-                    print("Clean Regeneration: Message matches cache. Attempting to regenerate...")
+                    Logger.info("Clean Regeneration: Message matches cache. Attempting to regenerate...")
                     if await self._click_regenerate():
-                        print("Clean Regeneration: Button clicked. Regenerating...")
+                        Logger.info("Clean Regeneration: Button clicked. Regenerating...")
                         regenerated = True
                     else:
-                        print("Clean Regeneration: Button not found or disabled. Falling back to new chat.")
+                        Logger.warning("Clean Regeneration: Button not found or disabled. Falling back to new chat.")
                 else:
-                    print("Clean Regeneration: Message differs from cache. Creating new chat.")
+                    Logger.debug("Clean Regeneration: Message differs from cache. Creating new chat.")
             
             if not regenerated:
                 # Trigger UI interaction
@@ -263,7 +264,7 @@ class DeepSeekDriver:
                 send_as_text_file = self.config_manager.get_setting("deepseek_behavior", "send_as_text_file")
                 
                 if send_as_text_file:
-                    print("Sending message as text file...")
+                    Logger.info("Sending message as text file...")
                     # Create a temporary file
                     with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.txt', encoding='utf-8') as temp_file:
                         temp_file.write(formatted_message)
@@ -293,7 +294,7 @@ class DeepSeekDriver:
             while True:
                 # Check for abort before waiting for next item
                 if self.abort_requested or (abort_event and abort_event.is_set()):
-                    print("Abort detected in response loop, breaking...")
+                    Logger.debug("Abort detected in response loop, breaking...")
                     break
                     
                 item = await response_queue.get()
@@ -317,7 +318,7 @@ class DeepSeekDriver:
         Aborts the current generation request.
         Called by the API when client disconnects.
         """
-        print("Abort generation requested...")
+        Logger.info("Abort generation requested...")
         self.abort_requested = True
         if self.current_abort_event:
             self.current_abort_event.set()
@@ -340,46 +341,46 @@ class DeepSeekDriver:
                 # Check if the button is in "stop" mode (enabled and clickable)
                 is_disabled = await stop_button.get_attribute("aria-disabled")
                 if is_disabled != "true":
-                    print("Clicking Stop button...")
+                    Logger.debug("Clicking Stop button...")
                     await stop_button.click()
-                    print("Stop button clicked successfully.")
+                    Logger.debug("Stop button clicked successfully.")
                     return True
                 else:
-                    print("Stop button is disabled (generation may have already stopped).")
+                    Logger.debug("Stop button is disabled (generation may have already stopped).")
             else:
-                print("Stop button not found.")
+                Logger.debug("Stop button not found.")
                 
             return False
         except Exception as e:
-            print(f"Error clicking stop button: {e}")
+            Logger.error(f"Error clicking stop button: {e}")
             return False
 
     async def _monitor_browser_loop(self):
         """
         Periodically checks if the browser is still open.
         """
-        print("Starting browser monitoring loop...")
+        Logger.debug("Starting browser monitoring loop...")
         while self.monitoring_active:
             try:
                 if not self.browser or not self.browser.is_connected():
-                    print("Browser disconnected!")
+                    Logger.warning("Browser disconnected!")
                     await self._handle_crash()
                     break
                 
                 if not self.page or self.page.is_closed():
-                    print("Page closed!")
+                    Logger.warning("Page closed!")
                     await self._handle_crash()
                     break
                     
                 # Also check if context is closed
                 if not self.context or len(self.context.pages) == 0:
                      # Sometimes page.is_closed() isn't enough if the whole context is gone
-                    print("Context has no pages or is closed!")
+                    Logger.warning("Context has no pages or is closed!")
                     await self._handle_crash()
                     break
 
             except Exception as e:
-                print(f"Error in monitoring loop: {e}")
+                Logger.debug(f"Error in monitoring loop: {e}")
                 # If we can't check, assume it's gone or something is wrong
                 pass
             
@@ -392,7 +393,7 @@ class DeepSeekDriver:
         if not self.monitoring_active:
             return
 
-        print("Browser crash detected!")
+        Logger.warning("Browser crash detected!")
         self.is_running = False
         self.monitoring_active = False
         
@@ -583,7 +584,7 @@ class DeepSeekDriver:
                             # Check for Anti-Censorship (CONTENT_FILTER)
                             if anti_censorship:
                                 if item_p == "status" and item_v == "CONTENT_FILTER":
-                                    print("Anti-Censorship triggered: Suppressing refusal message.")
+                                    Logger.info("Anti-Censorship triggered: Suppressing refusal message.")
                                     finish_reason = "stop"
                                     if getattr(self, "thinking_active", False):
                                         if send_deepthink:
@@ -691,7 +692,7 @@ class DeepSeekDriver:
                     except json.JSONDecodeError:
                         pass
         except Exception as e:
-            print(f"Error processing chunk: {e}")
+            Logger.error(f"Error processing chunk: {e}")
 
     async def set_deepthink_state(self, state: bool):
         """
@@ -700,17 +701,17 @@ class DeepSeekDriver:
         button = self.page.locator("button.ds-toggle-button", has_text="DeepThink")
         
         if await button.count() == 0:
-            print("DeepThink button not found.")
+            Logger.warning("DeepThink button not found.")
             return
 
         class_attr = await button.first.get_attribute("class") or ""
         is_selected = "ds-toggle-button--selected" in class_attr
         
         if is_selected != state:
-            print(f"Toggling DeepThink to {state}...")
+            Logger.debug(f"Toggling DeepThink to {state}...")
             await button.first.click()
         else:
-            print(f"DeepThink is already {state}.")
+            Logger.debug(f"DeepThink is already {state}.")
 
     async def set_search_state(self, state: bool):
         """
@@ -719,17 +720,17 @@ class DeepSeekDriver:
         button = self.page.locator("button.ds-toggle-button", has_text="Search")
         
         if await button.count() == 0:
-            print("Search button not found.")
+            Logger.warning("Search button not found.")
             return
 
         class_attr = await button.first.get_attribute("class") or ""
         is_selected = "ds-toggle-button--selected" in class_attr
         
         if is_selected != state:
-            print(f"Toggling Search to {state}...")
+            Logger.debug(f"Toggling Search to {state}...")
             await button.first.click()
         else:
-            print(f"Search is already {state}.")
+            Logger.debug(f"Search is already {state}.")
 
     async def set_sidebar_status(self, open: bool):
         """
@@ -742,7 +743,7 @@ class DeepSeekDriver:
 
         sidebar_inner = self.page.locator(sidebar_inner_selector)
         if await sidebar_inner.count() == 0:
-            print("Sidebar inner container not found.")
+            Logger.warning("Sidebar inner container not found.")
             return
 
         class_attr = await sidebar_inner.first.get_attribute("class") or ""
@@ -751,27 +752,27 @@ class DeepSeekDriver:
 
         if open:
             if is_open:
-                print("Sidebar is already open.")
+                Logger.debug("Sidebar is already open.")
                 return
 
-            print("Opening sidebar...")
+            Logger.debug("Opening sidebar...")
             open_btn = self.page.locator(open_button_selector)
             if await open_btn.is_visible():
                 await open_btn.click()
             else:
-                print("Open sidebar button not visible.")
+                Logger.warning("Open sidebar button not visible.")
                 
         else:
             if is_closed:
-                print("Sidebar is already closed.")
+                Logger.debug("Sidebar is already closed.")
                 return
             
-            print("Closing sidebar...")
+            Logger.debug("Closing sidebar...")
             close_btn = self.page.locator(close_button_selector)
             if await close_btn.is_visible():
                 await close_btn.click()
             else:
-                print("Close sidebar button not visible.")
+                Logger.warning("Close sidebar button not visible.")
 
     async def click_new_chat(self, source: str = "auto"):
         """
@@ -781,38 +782,38 @@ class DeepSeekDriver:
         sidebar_new_chat_selector = "div._5a8ac7a.a084f19e"
 
         if source == "simple":
-            print("Clicking New Chat (Simple)...")
+            Logger.debug("Clicking New Chat (Simple)...")
             btn = self.page.locator(simple_new_chat_selector)
             if await btn.count() > 0:
                 await btn.click()
             else:
-                print("New Chat (Simple) button not found.")
+                Logger.warning("New Chat (Simple) button not found.")
                 
         elif source == "sidebar":
-            print("Clicking New Chat (Sidebar)...")
+            Logger.debug("Clicking New Chat (Sidebar)...")
             btn = self.page.locator(sidebar_new_chat_selector)
             if await btn.count() > 0:
                 await btn.click()
             else:
-                print("New Chat (Sidebar) button not found.")
+                Logger.warning("New Chat (Sidebar) button not found.")
                 
         elif source == "auto":
-            print("Attempting to click New Chat (Auto)...")
+            Logger.debug("Attempting to click New Chat (Auto)...")
             simple_btn = self.page.locator(simple_new_chat_selector)
             if await simple_btn.count() > 0:
-                print("Found Simple New Chat button. Clicking...")
+                Logger.debug("Found Simple New Chat button. Clicking...")
                 await simple_btn.click()
                 return
                 
             sidebar_btn = self.page.locator(sidebar_new_chat_selector)
             if await sidebar_btn.count() > 0:
-                print("Found Sidebar New Chat button. Clicking...")
+                Logger.debug("Found Sidebar New Chat button. Clicking...")
                 await sidebar_btn.click()
                 return
                 
-            print("Could not find New Chat button in either mode.")
+            Logger.warning("Could not find New Chat button in either mode.")
         else:
-            print(f"Unknown source: {source}")
+            Logger.warning(f"Unknown source: {source}")
 
     async def enter_message(self, message: str):
         """
@@ -833,9 +834,9 @@ class DeepSeekDriver:
         # The textarea has placeholder "Message DeepSeek"
         textarea = self.page.locator("textarea[placeholder='Message DeepSeek']")
         if await textarea.count() == 0:
-            print("Message textarea not found.")
+            Logger.warning("Message textarea not found.")
             return
-        print(f"Entering message: {message}")
+        Logger.debug(f"Entering message: {message[:50]}..." if len(message) > 50 else f"Entering message: {message}")
         await textarea.fill(message)
 
     async def _send_message(self, timeout: int = None):
@@ -850,7 +851,7 @@ class DeepSeekDriver:
         if await send_button.count() > 0:
             # If timeout is provided, wait for the button to be enabled
             if timeout and timeout > 0:
-                print(f"Waiting up to {timeout} seconds for send button to be enabled...")
+                Logger.debug(f"Waiting up to {timeout} seconds for send button to be enabled...")
                 start_time = time.time()
                 while time.time() - start_time < timeout:
                     is_disabled = await send_button.get_attribute("aria-disabled") == "true"
@@ -860,12 +861,12 @@ class DeepSeekDriver:
             
             is_disabled = await send_button.get_attribute("aria-disabled") == "true"
             if not is_disabled:
-                print("Clicking send button...")
+                Logger.debug("Clicking send button...")
                 await send_button.click()
             else:
-                print("Send button is disabled. Cannot send message.")
+                Logger.warning("Send button is disabled. Cannot send message.")
         else:
-            print("Send button could not be located.")
+            Logger.warning("Send button could not be located.")
 
     async def _click_new_chat(self):
         """
@@ -892,31 +893,31 @@ class DeepSeekDriver:
             # Check if disabled
             is_disabled = await button.get_attribute("aria-disabled") == "true"
             if is_disabled:
-                print("Regenerate button is disabled (likely due to censorship).")
+                Logger.warning("Regenerate button is disabled (likely due to censorship).")
                 return False
             
-            print("Clicking regenerate button...")
+            Logger.debug("Clicking regenerate button...")
             await button.click()
             return True
         else:
-            print("Regenerate button not found.")
+            Logger.warning("Regenerate button not found.")
             return False
 
     async def _upload_file(self, file_path: str):
         """
         Uploads a file to the chat.
         """
-        print(f"Uploading file: {file_path}")
+        Logger.debug(f"Uploading file: {file_path}")
         
         # The file input is hidden or styled, but we can target it by type="file"
         file_input = self.page.locator("input[type='file']")
         
         if await file_input.count() > 0:
             await file_input.set_input_files(file_path)
-            print("File set to input.")
+            Logger.debug("File set to input.")
             
             # Wait a bit for the upload to be processed by the UI
             # You might need to wait for a specific indicator that the file is ready
             await asyncio.sleep(1.0) 
         else:
-            print("File input not found.")
+            Logger.warning("File input not found.")

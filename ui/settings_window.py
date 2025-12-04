@@ -9,6 +9,7 @@ from config.schema import SCHEMA, SettingType
 from .brand import BrandColors
 from .components import Tumbler, StyledLineEdit, StyledTextEdit, StyledComboBox, Divider, Description, StyledButton
 from .icons import IconUtils, IconType
+from utils.logger import Logger
 
 class SettingsWindow(QMainWindow):
     settings_saved = Signal()

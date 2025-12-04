@@ -9,8 +9,10 @@ from deepseek_driver import DeepSeekDriver
 from api import API
 from config.manager import ConfigManager
 from ui.settings_window import SettingsWindow
+from ui.console_window import ConsoleWindow
 from ui.brand import BrandColors
 from ui.icons import IconUtils, IconType
+from utils.logger import Logger, LogLevel
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -75,6 +77,42 @@ class MainWindow(QMainWindow):
         self.api = None
         self.server = None
         self.settings_window = None
+        self.console_window = None
+        
+        # Initialize console based on settings
+        self._setup_console()
+
+    def _setup_console(self):
+        """Setup console window based on settings."""
+        enable_console = self.config_manager.get_setting("system_settings", "enable_console")
+        if enable_console:
+            self._show_console()
+        else:
+            self._hide_console()
+    
+    def _show_console(self):
+        """Show the console window and connect logger."""
+        if not self.console_window:
+            self.console_window = ConsoleWindow()
+        
+        # Set logger callback
+        Logger.set_console_callback(self._on_log_message)
+        
+        self.console_window.show()
+        Logger.info("Console initialized.")
+    
+    def _hide_console(self):
+        """Hide the console window and disconnect logger."""
+        Logger.set_console_callback(None)
+        
+        if self.console_window:
+            self.console_window.force_close()
+            self.console_window = None
+    
+    def _on_log_message(self, level: LogLevel, message: str):
+        """Callback for logger to send messages to console."""
+        if self.console_window:
+            self.console_window.append_log(level.value, message)
 
     def open_settings(self):
         if not self.settings_window:
@@ -85,10 +123,11 @@ class MainWindow(QMainWindow):
         self.settings_window.activateWindow() # Bring to front
 
     def on_settings_saved(self):
-        print("Settings saved.")
+        Logger.info("Settings saved.")
+        # Handle console toggle
+        self._setup_console()
         # If driver is running, it will pick up changes on next generation
         # All thanks to the config manager being dynamic
-        pass
 
     @Slot()
     def on_start_clicked(self):
@@ -134,10 +173,10 @@ class MainWindow(QMainWindow):
             self.start_button.setEnabled(True)
             self.start_button.setText("Start")
             IconUtils.apply_icon(self.start_button, IconType.START, BrandColors.TEXT_PRIMARY)
-            print(f"Error starting services: {e}")
+            Logger.error(f"Error starting services: {e}")
 
     async def stop_services(self):
-        print("Stopping services...")
+        Logger.info("Stopping services...")
         try:
             if self.api:
                 await self.api.stop()
@@ -154,9 +193,9 @@ class MainWindow(QMainWindow):
             self.start_button.setText("Start")
             IconUtils.apply_icon(self.start_button, IconType.START, BrandColors.TEXT_PRIMARY)
             self.start_button.setEnabled(True)
-            print("Services stopped.")
+            Logger.success("Services stopped.")
         except Exception as e:
-            print(f"Error stopping services: {e}")
+            Logger.error(f"Error stopping services: {e}")
             self.status_label.setText(f"Error stopping: {e}")
             self.start_button.setEnabled(True)
 
@@ -164,7 +203,7 @@ class MainWindow(QMainWindow):
         """
         Callback for when the browser crashes or is closed manually.
         """
-        print("Browser crash callback received.")
+        Logger.warning("Browser crash callback received.")
         self.status_label.setText("Browser Closed/Crashed")
         
         # We need to clean up all services including playwright
@@ -182,7 +221,7 @@ class MainWindow(QMainWindow):
                 try:
                     await self.driver.close()
                 except Exception as e:
-                    print(f"Error closing driver after crash: {e}")
+                    Logger.error(f"Error closing driver after crash: {e}")
                 self.driver = None
             
             # Reset UI
@@ -191,16 +230,20 @@ class MainWindow(QMainWindow):
             self.start_button.setEnabled(True)
             
         except Exception as e:
-            print(f"Error handling crash cleanup: {e}")
+            Logger.error(f"Error handling crash cleanup: {e}")
             self.status_label.setText(f"Error: {e}")
             self.start_button.setEnabled(True)
 
     def closeEvent(self, event):
         # Cleanup on close
-        print("Window closing, shutting down...")
+        Logger.info("Window closing, shutting down...")
         # qasync loop runs until the window closes usually, but we need to await the cleanup.
         
         if self.status_label.text() in ["Stopped", "Ready", "Browser Closed/Crashed"]:
+            # Close console window if open
+            if self.console_window:
+                self.console_window.force_close()
+                self.console_window = None
             event.accept()
             return
 
@@ -213,6 +256,11 @@ class MainWindow(QMainWindow):
             # We need to call close again, but bypass this check
             # We can reset the status label
             self.status_label.setText("Stopped")
+            
+            # Close console window if open
+            if self.console_window:
+                self.console_window.force_close()
+                self.console_window = None
             
             # Close settings window if open
             if self.settings_window:

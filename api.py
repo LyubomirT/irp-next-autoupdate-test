@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 
 from deepseek_driver import DeepSeekDriver
+from utils.logger import Logger
 
 class Message(BaseModel):
     role: str
@@ -99,7 +100,7 @@ class API:
             while True:
                 # Check if client disconnected
                 if await raw_request.is_disconnected():
-                    print("Client disconnected, aborting request...")
+                    Logger.warning("Client disconnected, aborting request...")
                     abort_event.set()
                     # Signal the driver to abort (don't await, just set the flag)
                     self.driver.abort_requested = True
@@ -116,13 +117,13 @@ class API:
                     # No chunk available, continue to check for disconnection
                     continue
         except asyncio.CancelledError:
-            print("Stream generator cancelled, aborting...")
+            Logger.warning("Stream generator cancelled, aborting...")
             abort_event.set()
             # Just set the flag, don't await anything during cancellation
             self.driver.abort_requested = True
         except GeneratorExit:
             # Client disconnected abruptly
-            print("Generator exit, aborting...")
+            Logger.warning("Generator exit, aborting...")
             abort_event.set()
             self.driver.abort_requested = True
 
@@ -130,17 +131,17 @@ class API:
         self.worker_task = asyncio.create_task(self.worker())
 
     async def stop(self):
-        print("Stopping API worker...")
+        Logger.info("Stopping API worker...")
         if hasattr(self, 'worker_task'):
             self.worker_task.cancel()
             try:
                 await self.worker_task
             except asyncio.CancelledError:
                 pass
-        print("API worker stopped.")
+        Logger.info("API worker stopped.")
 
     async def worker(self):
-        print("API Worker started")
+        Logger.info("API Worker started")
         try:
             while True:
                 request, response_queue, abort_event = await self.request_queue.get()
@@ -158,12 +159,12 @@ class API:
                     ):
                         # Check if aborted before putting chunk
                         if abort_event.is_set():
-                            print("Request aborted, stopping chunk forwarding...")
+                            Logger.debug("Request aborted, stopping chunk forwarding...")
                             break
                         await response_queue.put(chunk)
                     
                 except Exception as e:
-                    print(f"Error in worker: {e}")
+                    Logger.error(f"Error in worker: {e}")
                     error_chunk = {
                         "error": {
                             "message": str(e),
@@ -177,5 +178,5 @@ class API:
                     self.current_abort_event = None
                     await response_queue.put(None)
         except asyncio.CancelledError:
-            print("API Worker cancelled")
+            Logger.info("API Worker cancelled")
             raise

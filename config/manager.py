@@ -5,6 +5,7 @@ from typing import Any, Dict
 from cryptography.fernet import Fernet
 from .schema import SCHEMA, SettingType
 from .migrator import SettingsMigrator
+from utils.logger import Logger
 
 class ConfigManager:
     def __init__(self, config_dir: str = "config_data"):
@@ -50,7 +51,7 @@ class ConfigManager:
             self._merge_defaults()
             
         except Exception as e:
-            print(f"Error loading settings: {e}")
+            Logger.error(f"Error loading settings: {e}")
             self._init_default_settings()
 
     def _init_default_settings(self):
@@ -83,7 +84,7 @@ class ConfigManager:
             with open(self.settings_file, "wb") as f:
                 f.write(encrypted_data)
         except Exception as e:
-            print(f"Error saving settings: {e}")
+            Logger.error(f"Error saving settings: {e}")
 
     def get_setting(self, category_key: str, field_key: str) -> Any:
         return self.settings.get(category_key, {}).get(field_key)

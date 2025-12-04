@@ -363,4 +363,18 @@ SCHEMA = [
             ),
         ]
     ),
+    SettingCategory(
+        name="System Settings",
+        key="system_settings",
+        fields=[
+            SettingField(
+                key="enable_console",
+                label="Enable Console",
+                type=SettingType.BOOLEAN,
+                default=False,
+                tooltip="Show a console window for viewing application logs."
+            ),
+        ]
+    ),
 ]
+

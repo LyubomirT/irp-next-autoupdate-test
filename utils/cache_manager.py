@@ -1,5 +1,6 @@
 import os
 import shutil
+from .logger import Logger
 
 class CacheManager:
     def __init__(self, cache_dir="cache"):
@@ -25,7 +26,7 @@ class CacheManager:
             with open(filepath, 'r', encoding='utf-8') as f:
                 return f.read()
         except Exception as e:
-            print(f"Error reading cache file {filename}: {e}")
+            Logger.error(f"Error reading cache file {filename}: {e}")
             return None
 
     def write_cache(self, filename, content):
@@ -35,7 +36,7 @@ class CacheManager:
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(content)
         except Exception as e:
-            print(f"Error writing to cache file {filename}: {e}")
+            Logger.error(f"Error writing to cache file {filename}: {e}")
 
     def clear_cache(self, filename):
         """Removes a specific cache file."""
@@ -44,7 +45,7 @@ class CacheManager:
             try:
                 os.remove(filepath)
             except Exception as e:
-                print(f"Error clearing cache file {filename}: {e}")
+                Logger.error(f"Error clearing cache file {filename}: {e}")
 
     def clear_all_cache(self):
         """Removes the entire cache directory."""
@@ -53,4 +54,4 @@ class CacheManager:
                 shutil.rmtree(self.cache_dir)
                 self.ensure_cache_dir()
             except Exception as e:
-                print(f"Error clearing all cache: {e}")
+                Logger.error(f"Error clearing all cache: {e}")
