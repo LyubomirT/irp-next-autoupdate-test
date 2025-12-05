@@ -93,7 +93,7 @@ class MainWindow(QMainWindow):
     def _show_console(self):
         """Show the console window and connect logger."""
         if not self.console_window:
-            self.console_window = ConsoleWindow()
+            self.console_window = ConsoleWindow(self.config_manager)
         
         # Set logger callback
         Logger.set_console_callback(self._on_log_message)
@@ -126,6 +126,12 @@ class MainWindow(QMainWindow):
         Logger.info("Settings saved.")
         # Handle console toggle
         self._setup_console()
+        
+        # Update console settings if it exists
+        # Rule 43 of The Internet: If it exists, then it exists
+        if self.console_window:
+            self.console_window.apply_settings()
+            
         # If driver is running, it will pick up changes on next generation
         # All thanks to the config manager being dynamic
 

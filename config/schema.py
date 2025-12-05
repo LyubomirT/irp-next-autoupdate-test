@@ -376,5 +376,40 @@ SCHEMA = [
             ),
         ]
     ),
+    SettingCategory(
+        name="Console Settings",
+        key="console_settings",
+        fields=[
+            SettingField(
+                key="max_lines",
+                label="Max Line Limit",
+                type=SettingType.INTEGER,
+                default=500,
+                tooltip="Maximum number of lines to keep in the console history."
+            ),
+            SettingField(
+                key="font_size",
+                label="Font Size",
+                type=SettingType.INTEGER,
+                default=10,
+                tooltip="Font size for the console text."
+            ),
+            SettingField(
+                key="color_palette",
+                label="Color Palette",
+                type=SettingType.DROPDOWN,
+                default="Modern",
+                options=["Modern", "Classic", "Bright"],
+                tooltip="Choose a color scheme for log levels."
+            ),
+            SettingField(
+                key="always_on_top",
+                label="Always On Top",
+                type=SettingType.BOOLEAN,
+                default=False,
+                tooltip="Keep the console window on top of other windows."
+            ),
+        ]
+    ),
 ]
 
