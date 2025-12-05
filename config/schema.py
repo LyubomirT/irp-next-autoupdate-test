@@ -13,6 +13,7 @@ class SettingType(Enum):
     DIVIDER = "divider"
     DESCRIPTION = "description"
     BUTTON = "button"
+    ROW = "row"
 
 @dataclass
 class SettingField:
@@ -26,6 +27,8 @@ class SettingField:
     depends: Optional[str] = None
     options: Optional[List[str]] = None # For dropdowns
     action: Optional[str] = None # For buttons (function name to call)
+    sub_fields: Optional[List["SettingField"]] = None # For ROW type
+    ratios: Optional[List[int]] = None # For ROW type (e.g. [70, 30])
 
 @dataclass
 class SettingCategory:
@@ -244,6 +247,57 @@ SCHEMA = [
                 type=SettingType.BOOLEAN,
                 default=False,
                 tooltip="If enabled, attempts to regenerate the last message instead of creating a new chat if the prompt is identical."
+            ),
+        ]
+    ),
+    SettingCategory(
+        name="Logfiles",
+        key="logfiles",
+        fields=[
+            SettingField(
+                key="enable_logfiles",
+                label="Enable Logfiles",
+                type=SettingType.BOOLEAN,
+                default=False,
+                tooltip="Enable logging to files."
+            ),
+            SettingField(
+                key="log_dir",
+                label="Log Directory",
+                type=SettingType.STRING,
+                default="logs",
+                tooltip="Directory to store log files."
+            ),
+            SettingField(
+                key="max_files",
+                label="Max Log Files",
+                type=SettingType.INTEGER,
+                default=5,
+                tooltip="Maximum number of log files to keep (before rotation). 0 for unlimited."
+            ),
+            SettingField(
+                key="max_file_size",
+                label="Max File Size",
+                type=SettingType.ROW,
+                default=None,
+                ratios=[70, 30],
+                sub_fields=[
+                     SettingField(
+                        key="size_val",
+                        label="Size Value",
+                        type=SettingType.INTEGER,
+                        default=10,
+                        tooltip="Max file size value. 0 for unlimited."
+                    ),
+                    SettingField(
+                        key="size_unit",
+                        label="Unit",
+                        type=SettingType.DROPDOWN,
+                        default="MB",
+                        options=["KB", "MB", "GB"],
+                        tooltip="Unit for max file size."
+                    ),
+                ]
             ),
         ]
     ),

@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from config.manager import ConfigManager
 from config.schema import SCHEMA, SettingType
 from .brand import BrandColors
-from .components import Tumbler, StyledLineEdit, StyledTextEdit, StyledComboBox, Divider, Description, StyledButton
+from .components import Tumbler, StyledLineEdit, StyledTextEdit, StyledComboBox, Divider, Description, StyledButton, MultiColumnRow
 from .icons import IconUtils, IconType
 from utils.logger import Logger
 
@@ -27,7 +27,53 @@ class SettingsWindow(QMainWindow):
         self._init_ui()
         self._load_values()
 
+    def _create_field_widget(self, field, category_key):
+        widget = None
+        if field.type == SettingType.BOOLEAN:
+            widget = Tumbler()
+            widget.stateChanged.connect(self._on_setting_changed)
+        elif field.type in [SettingType.STRING, SettingType.PASSWORD, SettingType.INTEGER]:
+            widget = StyledLineEdit()
+            if field.type == SettingType.PASSWORD:
+                widget.setEchoMode(QLineEdit.Password)
+            elif field.type == SettingType.INTEGER:
+                from PySide6.QtGui import QIntValidator
+                widget.setValidator(QIntValidator())
+            widget.textChanged.connect(self._on_setting_changed)
+        elif field.type == SettingType.DROPDOWN:
+            widget = StyledComboBox()
+            if field.options:
+                widget.addItems(field.options)
+            widget.currentTextChanged.connect(self._on_setting_changed)
+            
+            # Specific logic for formatting preset
+            if field.key == "formatting_preset":
+                widget.currentTextChanged.connect(self._on_preset_changed)
+                
+        elif field.type == SettingType.BUTTON:
+            widget = StyledButton(field.label)
+            # use the default value as button text if provided, else label
+            btn_text = str(field.default) if field.default else field.label
+            widget.setText(btn_text)
+            
+            if field.action == "reset_injection":
+                widget.clicked.connect(self._reset_injection)
+            elif field.action == "reset_formatting":
+                widget.clicked.connect(self._reset_formatting)
+        
+        if widget:
+            self.field_widgets[f"{category_key}.{field.key}"] = widget
+            
+        return widget
+
+    def _iter_fields(self, fields):
+        for field in fields:
+            yield field
+            if field.type == SettingType.ROW:
+                yield from self._iter_fields(field.sub_fields)
+
     def _init_ui(self):
+
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
@@ -204,37 +250,16 @@ class SettingsWindow(QMainWindow):
                     
                     # Widget based on type
                     widget = None
-                    if field.type == SettingType.BOOLEAN:
-                        widget = Tumbler()
-                        widget.stateChanged.connect(self._on_setting_changed)
-                    elif field.type in [SettingType.STRING, SettingType.PASSWORD, SettingType.INTEGER]:
-                        widget = StyledLineEdit()
-                        if field.type == SettingType.PASSWORD:
-                            widget.setEchoMode(QLineEdit.Password)
-                        elif field.type == SettingType.INTEGER:
-                            from PySide6.QtGui import QIntValidator
-                            widget.setValidator(QIntValidator())
-                        widget.textChanged.connect(self._on_setting_changed)
-                    elif field.type == SettingType.DROPDOWN:
-                        widget = StyledComboBox()
-                        if field.options:
-                            widget.addItems(field.options)
-                        widget.currentTextChanged.connect(self._on_setting_changed)
-                        
-                        # Specific logic for formatting preset
-                        if field.key == "formatting_preset":
-                            widget.currentTextChanged.connect(self._on_preset_changed)
-                            
-                    elif field.type == SettingType.BUTTON:
-                        widget = StyledButton(field.label)
-                        # use the default value as button text if provided, else label
-                        btn_text = str(field.default) if field.default else field.label
-                        widget.setText(btn_text)
-                        
-                        if field.action == "reset_injection":
-                            widget.clicked.connect(self._reset_injection)
-                        elif field.action == "reset_formatting":
-                            widget.clicked.connect(self._reset_formatting)
+                    if field.type == SettingType.ROW:
+                        sub_widgets = []
+                        if field.sub_fields:
+                            for sub in field.sub_fields:
+                                sub_w = self._create_field_widget(sub, category.key)
+                                sub_widgets.append(sub_w)
+                        widget = MultiColumnRow(sub_widgets, field.ratios)
+                        self.field_widgets[f"{category.key}.{field.key}"] = widget
+                    else:
+                        widget = self._create_field_widget(field, category.key)
                 
                 if widget:
                     widget.setToolTip(field.tooltip or "")
@@ -301,7 +326,7 @@ class SettingsWindow(QMainWindow):
         # Setup dependency tracking
         self.dependencies = {} # Map "dependency_key" -> list of "dependent_key"
         for category in SCHEMA:
-            for field in category.fields:
+            for field in self._iter_fields(category.fields):
                 if field.depends:
                     if field.depends not in self.dependencies:
                         self.dependencies[field.depends] = []
@@ -315,7 +340,7 @@ class SettingsWindow(QMainWindow):
 
     def _load_values(self):
         for category in SCHEMA:
-            for field in category.fields:
+            for field in self._iter_fields(category.fields):
                 key = f"{category.key}.{field.key}"
                 value = self.config_manager.get_setting(category.key, field.key)
                 widget = self.field_widgets.get(key)
@@ -481,7 +506,7 @@ class SettingsWindow(QMainWindow):
         validation_errors = []
         
         for category in SCHEMA:
-            for field in category.fields:
+            for field in self._iter_fields(category.fields):
                 key = f"{category.key}.{field.key}"
                 widget = self.field_widgets.get(key)
                 
@@ -498,7 +523,7 @@ class SettingsWindow(QMainWindow):
                         value = widget.toPlainText()
                     elif field.type == SettingType.DROPDOWN:
                         value = widget.currentText()
-                    elif field.type in [SettingType.BUTTON, SettingType.DIVIDER, SettingType.DESCRIPTION]:
+                    elif field.type in [SettingType.BUTTON, SettingType.DIVIDER, SettingType.DESCRIPTION, SettingType.ROW]:
                         continue # These don't have values to save
                         
                     # Check dependencies

@@ -3,6 +3,19 @@ from PySide6.QtCore import Property, QSize, Qt, QRect, Signal, QEvent
 from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QIcon
 from .brand import BrandColors
 
+class MultiColumnRow(QWidget):
+    def __init__(self, widgets, ratios=None, spacing=10, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(spacing)
+        
+        self.widgets = widgets
+        
+        for i, widget in enumerate(widgets):
+            ratio = ratios[i] if ratios and i < len(ratios) else 1
+            layout.addWidget(widget, stretch=ratio)
+
 class StyledTextEdit(QFrame):
     textChanged = Signal()
 
@@ -101,7 +114,6 @@ class StyledComboBox(QComboBox):
                 padding: 5px 10px;
                 font-size: {BrandColors.FONT_SIZE_REGULAR};
                 font-family: {BrandColors.FONT_FAMILY};
-                min-width: 150px;
             }}
             QComboBox:hover {{
                 border: 2px solid {BrandColors.ITEM_HOVER};

@@ -79,16 +79,32 @@ class MainWindow(QMainWindow):
         self.settings_window = None
         self.console_window = None
         
-        # Initialize console based on settings
-        self._setup_console()
+        # Initialize logging based on settings
+        self._setup_logging()
 
-    def _setup_console(self):
-        """Setup console window based on settings."""
+    def _setup_logging(self):
+        """Setup logging (console and file) based on settings."""
+        # Console
         enable_console = self.config_manager.get_setting("system_settings", "enable_console")
         if enable_console:
             self._show_console()
         else:
             self._hide_console()
+            
+        # File Logging
+        enable_files = self.config_manager.get_setting("logfiles", "enable_logfiles")
+        log_dir = self.config_manager.get_setting("logfiles", "log_dir")
+        max_files = self.config_manager.get_setting("logfiles", "max_files")
+        max_size_val = self.config_manager.get_setting("logfiles", "size_val")
+        size_unit = self.config_manager.get_setting("logfiles", "size_unit")
+        
+        # Defaults
+        if log_dir is None: log_dir = "logs"
+        if max_files is None: max_files = 5
+        if max_size_val is None: max_size_val = 10
+        if size_unit is None: size_unit = "MB"
+        
+        Logger.configure_file_logging(bool(enable_files), str(log_dir), int(max_files) if max_files is not None else 5, int(max_size_val) if max_size_val is not None else 10, str(size_unit))
     
     def _show_console(self):
         """Show the console window and connect logger."""
@@ -124,8 +140,8 @@ class MainWindow(QMainWindow):
 
     def on_settings_saved(self):
         Logger.info("Settings saved.")
-        # Handle console toggle
-        self._setup_console()
+        # Handle logging toggle
+        self._setup_logging()
         
         # Update console settings if it exists
         # Rule 43 of The Internet: If it exists, then it exists
