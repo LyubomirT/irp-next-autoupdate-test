@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import QCheckBox, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QTextEdit, QComboBox, QFrame, QPushButton, QSizePolicy
 from PySide6.QtCore import Property, QSize, Qt, QRect, Signal, QEvent
+import os
 from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QIcon
 from .brand import BrandColors
 
@@ -130,10 +131,10 @@ class StyledComboBox(QComboBox):
                 border-bottom-right-radius: 6px;
             }}
             QComboBox::down-arrow {{
-                image: none; /* We could add a custom arrow here if needed */
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 5px solid {BrandColors.TEXT_SECONDARY};
+                /* I AM (in) PAIN */
+                image: url({os.path.join(os.path.dirname(__file__), "assets", "icons", "chevron-down.svg").replace(os.sep, "/")});
+                width: 16px;
+                height: 16px;
                 margin-right: 5px;
             }}
             QComboBox QAbstractItemView {{
