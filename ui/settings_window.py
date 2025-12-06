@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from config.manager import ConfigManager
 from config.schema import SCHEMA, SettingType
 from .brand import BrandColors
-from .components import Tumbler, StyledLineEdit, StyledTextEdit, StyledComboBox, Divider, Description, StyledButton, MultiColumnRow
+from .components import Tumbler, StyledLineEdit, StyledTextEdit, StyledComboBox, Divider, Description, StyledButton, MultiColumnRow, SettingRow, ToggleRow
 from .icons import IconUtils, IconType
 from utils.logger import Logger
 
@@ -23,6 +23,7 @@ class SettingsWindow(QMainWindow):
         
         self.unsaved_changes = False
         self.field_widgets = {} # Map "category.key" -> widget
+        self.setting_rows = {} # Map "category.key" -> SettingRow (for dependency toggling)
 
         self._init_ui()
         self._load_values()
@@ -163,7 +164,7 @@ class SettingsWindow(QMainWindow):
         self.scroll_content = QWidget()
         self.scroll_layout = QVBoxLayout(self.scroll_content)
         self.scroll_layout.setContentsMargins(0, 0, 10, 0) # Add right margin for scrollbar space
-        self.scroll_layout.setSpacing(20)
+        self.scroll_layout.setSpacing(BrandColors.CARD_SPACING)
         self.scroll_layout.setAlignment(Qt.AlignTop)
         
         self.category_widgets = {} # Map category key -> widget (for scrolling)
@@ -182,8 +183,8 @@ class SettingsWindow(QMainWindow):
                 }}
             """)
             card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(20, 15, 20, 20)
-            card_layout.setSpacing(15)
+            card_layout.setContentsMargins(BrandColors.CARD_PADDING, 18, BrandColors.CARD_PADDING, BrandColors.CARD_PADDING)
+            card_layout.setSpacing(4)  # now SettingRow/ToggleRow have their own internal padding
             
             self.category_widgets[category.name] = card
             
@@ -218,55 +219,57 @@ class SettingsWindow(QMainWindow):
                     card_layout.addWidget(widget)
                     continue
 
-                field_container = QWidget()
-                field_container.setStyleSheet("background-color: transparent;")
-                
-                # Use VBox for Textarea to give it more space, HBox for others
+                # Use VBox for Textarea to give it more space
                 if field.type == SettingType.TEXTAREA:
+                    field_container = QWidget()
+                    field_container.setStyleSheet("background-color: transparent;")
                     field_layout = QVBoxLayout(field_container)
-                    field_layout.setContentsMargins(0, 5, 0, 5)
+                    field_layout.setContentsMargins(0, 10, 0, 10)
+                    field_layout.setSpacing(6)
                     
                     label = QLabel(field.label)
                     label.setToolTip(field.tooltip or "")
-                    # Changed color to TEXT_SECONDARY to differentiate from input text
-                    label.setStyleSheet(f"font-size: {BrandColors.FONT_SIZE_LARGE}; color: {BrandColors.TEXT_SECONDARY}; background-color: transparent;")
+                    # Consistent label styling with SettingRow
+                    label.setStyleSheet(f"font-size: {BrandColors.FONT_SIZE_REGULAR}; font-weight: 500; color: {BrandColors.TEXT_SECONDARY}; background-color: transparent;")
                     field_layout.addWidget(label)
                     
                     widget = StyledTextEdit()
                     widget.textChanged.connect(self._on_setting_changed)
-                    
-                else:
-                    field_layout = QHBoxLayout(field_container)
-                    field_layout.setContentsMargins(0, 5, 0, 5)
-                    
-                    # Label
-                    label = QLabel(field.label)
-                    label.setToolTip(field.tooltip or "")
-                    # Reverted color to TEXT_PRIMARY for consistency with other fields
-                    label.setStyleSheet(f"font-size: {BrandColors.FONT_SIZE_LARGE}; color: {BrandColors.TEXT_PRIMARY}; background-color: transparent;")
-                    field_layout.addWidget(label)
-                    
-                    field_layout.addStretch()
-                    
-                    # Widget based on type
-                    widget = None
-                    if field.type == SettingType.ROW:
-                        sub_widgets = []
-                        if field.sub_fields:
-                            for sub in field.sub_fields:
-                                sub_w = self._create_field_widget(sub, category.key)
-                                sub_widgets.append(sub_w)
-                        widget = MultiColumnRow(sub_widgets, field.ratios)
-                        self.field_widgets[f"{category.key}.{field.key}"] = widget
-                    else:
-                        widget = self._create_field_widget(field, category.key)
-                
-                if widget:
                     widget.setToolTip(field.tooltip or "")
                     field_layout.addWidget(widget)
                     self.field_widgets[f"{category.key}.{field.key}"] = widget
+                    card_layout.addWidget(field_container)
+                    continue
                 
-                card_layout.addWidget(field_container)
+                # Handle ROW type (multiple controls in one row)
+                if field.type == SettingType.ROW:
+                    sub_widgets = []
+                    if field.sub_fields:
+                        for sub in field.sub_fields:
+                            sub_w = self._create_field_widget(sub, category.key)
+                            sub_widgets.append(sub_w)
+                    widget = MultiColumnRow(sub_widgets, field.ratios)
+                    widget.setToolTip(field.tooltip or "")
+                    self.field_widgets[f"{category.key}.{field.key}"] = widget
+                    
+                    # Use SettingRow for consistent layout
+                    row = SettingRow(field.label, widget, field.tooltip)
+                    self.setting_rows[f"{category.key}.{field.key}"] = row
+                    card_layout.addWidget(row)
+                    continue
+                
+                # Standard field types - use appropriate row layout
+                widget = self._create_field_widget(field, category.key)
+                if widget:
+                    # Use ToggleRow for boolean fields (compact horizontal layout)
+                    # Pass tooltip as description to show it inline below the label
+                    # Use SettingRow for everything else (stacked vertical layout)
+                    if field.type == SettingType.BOOLEAN:
+                        row = ToggleRow(field.label, widget, field.tooltip, description=field.tooltip)
+                    else:
+                        row = SettingRow(field.label, widget, field.tooltip)
+                    self.setting_rows[f"{category.key}.{field.key}"] = row
+                    card_layout.addWidget(row)
             
             self.scroll_layout.addWidget(card)
 
@@ -389,7 +392,12 @@ class SettingsWindow(QMainWindow):
             for dependent_key in dependent_keys:
                 widget = self.field_widgets.get(dependent_key)
                 if widget:
-                    widget.setEnabled(is_met)
+                    # If there's a SettingRow for this field, enable/disable the whole row
+                    row = self.setting_rows.get(dependent_key)
+                    if row:
+                        row.setEnabled(is_met)
+                    else:
+                        widget.setEnabled(is_met)
                     if not is_met and isinstance(widget, StyledLineEdit):
                         widget.set_error(False) # Clear error if disabled
 

@@ -35,3 +35,12 @@ class BrandColors:
     FONT_SIZE_LARGE = "16px"
     FONT_SIZE_XLARGE = "18px"
     FONT_SIZE_TITLE = "20px"
+    
+    # Spacing tokens
+    SETTING_ROW_GAP = 12  # Gap between setting rows
+    CONTROL_MIN_WIDTH = 180  # Minimum width for controls (inputs, dropdowns)
+    BUTTON_MIN_WIDTH = 80  # Minimum width for buttons
+    CARD_PADDING = 20  # Internal card padding
+    CARD_SPACING = 24  # Space between cards
+    DIVIDER_MARGIN_TOP = 16  # Top margin for section dividers
+    DIVIDER_MARGIN_BOTTOM = 8  # Bottom margin for section dividers

@@ -106,13 +106,15 @@ class StyledComboBox(QComboBox):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
+        # Disable scroll wheel changing values
+        self.setFocusPolicy(Qt.StrongFocus)
         self.setStyleSheet(f"""
             QComboBox {{
                 background-color: {BrandColors.INPUT_BG};
                 color: {BrandColors.TEXT_PRIMARY};
                 border: 2px solid {BrandColors.INPUT_BORDER};
                 border-radius: 6px;
-                padding: 5px 10px;
+                padding: 8px 12px;
                 font-size: {BrandColors.FONT_SIZE_REGULAR};
                 font-family: {BrandColors.FONT_FAMILY};
             }}
@@ -146,31 +148,42 @@ class StyledComboBox(QComboBox):
                 outline: none;
             }}
         """)
+    
+    def wheelEvent(self, event):
+        # Ignore wheel events to prevent accidental value changes when scrolling
+        event.ignore()
+
 
 class Divider(QWidget):
     def __init__(self, text=None, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 10, 0, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(0, 20, 0, 12)
+        layout.setSpacing(12)
         
         line1 = QFrame()
         line1.setFrameShape(QFrame.HLine)
         line1.setFrameShadow(QFrame.Sunken)
-        line1.setStyleSheet(f"background-color: {BrandColors.INPUT_BORDER};")
+        line1.setFixedHeight(1)
+        line1.setStyleSheet(f"background-color: {BrandColors.INPUT_BORDER}; border: none;")
         layout.addWidget(line1)
         
         if text:
             label = QLabel(text)
-            # Increased font size and centered alignment
-            label.setStyleSheet(f"color: {BrandColors.TEXT_SECONDARY}; font-weight: bold; font-size: {BrandColors.FONT_SIZE_LARGE};")
+            label.setStyleSheet(f"""
+                color: {BrandColors.TEXT_PRIMARY}; 
+                font-weight: 600; 
+                font-size: {BrandColors.FONT_SIZE_LARGE};
+                letter-spacing: 0.5px;
+            """)
             label.setAlignment(Qt.AlignCenter)
             layout.addWidget(label)
             
             line2 = QFrame()
             line2.setFrameShape(QFrame.HLine)
             line2.setFrameShadow(QFrame.Sunken)
-            line2.setStyleSheet(f"background-color: {BrandColors.INPUT_BORDER};")
+            line2.setFixedHeight(1)
+            line2.setStyleSheet(f"background-color: {BrandColors.INPUT_BORDER}; border: none;")
             layout.addWidget(line2)
 
 class Description(QLabel):
@@ -313,7 +326,7 @@ class StyledLineEdit(QLineEdit):
                 color: {BrandColors.TEXT_PRIMARY};
                 border: 2px solid {border_color};
                 border-radius: 6px;
-                padding: 8px;
+                padding: 10px 12px;
                 font-size: {BrandColors.FONT_SIZE_REGULAR};
                 font-family: {BrandColors.FONT_FAMILY};
             }}
@@ -327,3 +340,129 @@ class StyledLineEdit(QLineEdit):
                 opacity: 0.6;
             }}
         """)
+
+
+class SettingRow(QWidget):
+    """A stacked layout for settings with label above and full-width control below."""
+    
+    def __init__(self, label_text: str, control_widget: QWidget, tooltip: str = None, description: str = None, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet("background-color: transparent;")
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 10, 0, 10)
+        layout.setSpacing(6)
+        
+        # Label
+        self.label = QLabel(label_text)
+        self.label.setStyleSheet(f"""
+            font-size: {BrandColors.FONT_SIZE_REGULAR}; 
+            color: {BrandColors.TEXT_SECONDARY}; 
+            background-color: transparent;
+            font-weight: 500;
+        """)
+        if tooltip:
+            self.label.setToolTip(tooltip)
+        layout.addWidget(self.label)
+        
+        # Optional description
+        if description:
+            desc_label = QLabel(description)
+            desc_label.setWordWrap(True)
+            desc_label.setStyleSheet(f"""
+                font-size: {BrandColors.FONT_SIZE_SMALL}; 
+                color: {BrandColors.TEXT_DISABLED}; 
+                background-color: transparent;
+                padding-bottom: 4px;
+            """)
+            layout.addWidget(desc_label)
+        
+        # Control widget - full width
+        self.control = control_widget
+        if tooltip:
+            self.control.setToolTip(tooltip)
+        
+        # Make control expand to full width
+        self.control.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout.addWidget(self.control)
+        
+    def setEnabled(self, enabled: bool):
+        super().setEnabled(enabled)
+        self.control.setEnabled(enabled)
+        # Dim the label when disabled
+        label_color = BrandColors.TEXT_SECONDARY if enabled else BrandColors.TEXT_DISABLED
+        self.label.setStyleSheet(f"""
+            font-size: {BrandColors.FONT_SIZE_REGULAR}; 
+            color: {label_color}; 
+            background-color: transparent;
+            font-weight: 500;
+        """)
+
+
+class ToggleRow(QWidget):
+    """A compact horizontal layout for toggle settings (label left, toggle right)."""
+    
+    def __init__(self, label_text: str, toggle_widget: QWidget, tooltip: str = None, description: str = None, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet("background-color: transparent;")
+        
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(0, 12, 0, 12)
+        main_layout.setSpacing(16)
+        
+        # Left side: Label and optional description
+        left_layout = QVBoxLayout()
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(3)
+        
+        # Label
+        self.label = QLabel(label_text)
+        self.label.setStyleSheet(f"""
+            font-size: {BrandColors.FONT_SIZE_LARGE}; 
+            color: {BrandColors.TEXT_PRIMARY}; 
+            background-color: transparent;
+        """)
+        if tooltip:
+            self.label.setToolTip(tooltip)
+        left_layout.addWidget(self.label)
+        
+        # Optional description (shown below label)
+        if description:
+            self.desc_label = QLabel(description)
+            self.desc_label.setWordWrap(True)
+            self.desc_label.setStyleSheet(f"""
+                font-size: {BrandColors.FONT_SIZE_SMALL}; 
+                color: {BrandColors.TEXT_DISABLED}; 
+                background-color: transparent;
+            """)
+            left_layout.addWidget(self.desc_label)
+        else:
+            self.desc_label = None
+        
+        # Left side takes available space (stretch=1), toggle takes minimum (stretch=0)
+        main_layout.addLayout(left_layout, 1)
+        
+        # Right side: Toggle (stays on right edge)
+        self.control = toggle_widget
+        if tooltip:
+            self.control.setToolTip(tooltip)
+        main_layout.addWidget(self.control, 0)
+        
+    def setEnabled(self, enabled: bool):
+        super().setEnabled(enabled)
+        self.control.setEnabled(enabled)
+        # Dim the label when disabled
+        label_color = BrandColors.TEXT_PRIMARY if enabled else BrandColors.TEXT_DISABLED
+        self.label.setStyleSheet(f"""
+            font-size: {BrandColors.FONT_SIZE_LARGE}; 
+            color: {label_color}; 
+            background-color: transparent;
+        """)
+        if self.desc_label:
+            desc_color = BrandColors.TEXT_DISABLED if enabled else BrandColors.TEXT_DISABLED
+            self.desc_label.setStyleSheet(f"""
+                font-size: {BrandColors.FONT_SIZE_SMALL}; 
+                color: {desc_color}; 
+                background-color: transparent;
+            """)
+
