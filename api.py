@@ -35,6 +35,11 @@ class API:
             if not self.driver.is_running:
                 raise HTTPException(status_code=503, detail="DeepSeek Driver is not running")
 
+            # Log incoming request
+            msg_count = len(request.messages)
+            stream_mode = "streaming" if request.stream else "non-streaming"
+            Logger.info(f"Received chat completion request ({msg_count} messages, {stream_mode})")
+
             # Create a queue for the response chunks
             response_queue = asyncio.Queue()
             
@@ -146,6 +151,7 @@ class API:
             while True:
                 request, response_queue, abort_event = await self.request_queue.get()
                 self.current_abort_event = abort_event
+                Logger.info("Processing queued request...")
                 try:
                     # Call the driver with the raw messages list
                     # The driver will handle formatting
@@ -177,6 +183,7 @@ class API:
                 finally:
                     self.current_abort_event = None
                     await response_queue.put(None)
+                    Logger.success("Request completed.")
         except asyncio.CancelledError:
             Logger.info("API Worker cancelled")
             raise

@@ -148,6 +148,7 @@ class DeepSeekDriver:
         
         async def handle_route(route):
             request = route.request
+            Logger.info("Intercepting DeepSeek API request...")
             Logger.debug(f"Intercepted request to: {request.url}")
             
             # Prepare headers and cookies
@@ -172,6 +173,7 @@ class DeepSeekDriver:
             try:
                 async with httpx.AsyncClient() as client:
                     try:
+                        Logger.info("Streaming response from DeepSeek...")
                         async with client.stream("POST", request.url, headers=headers, cookies=cookie_dict, json=post_data, timeout=60.0) as response:
                             # Capture headers to forward them later
                             # We specifically need Content-Type so the frontend knows it's an SSE stream
@@ -206,6 +208,7 @@ class DeepSeekDriver:
             
             # If aborted, click the stop button in DeepSeek UI
             if aborted or self.abort_requested:
+                Logger.warning("Generation aborted by user.")
                 Logger.debug("Request was aborted, clicking Stop button...")
                 await self._click_stop_button()
             
@@ -218,6 +221,8 @@ class DeepSeekDriver:
             
             # Signal end of stream
             await response_queue.put(None)
+            if not aborted and not self.abort_requested:
+                Logger.success("Response streaming completed.")
 
         # Set up interception
         await self.page.route("**/api/v0/chat/completion", handle_route)
@@ -246,6 +251,7 @@ class DeepSeekDriver:
             if not regenerated:
                 # Trigger UI interaction
                 # Clear previous chat by clicking New Chat
+                Logger.info("Preparing new chat session...")
                 await self._click_new_chat()
                 # Small wait for the UI to update
                 await asyncio.sleep(0.5)
@@ -281,9 +287,11 @@ class DeepSeekDriver:
                     
                     # Get timeout from settings
                     upload_timeout = self.config_manager.get_setting("deepseek_behavior", "file_upload_timeout")
+                    Logger.info("Sending request to DeepSeek...")
                     await self._send_message(timeout=upload_timeout)
                 else:
                     await self._enter_message(formatted_message)
+                    Logger.info("Sending request to DeepSeek...")
                     await self._send_message()
                 
                 # Update cache
