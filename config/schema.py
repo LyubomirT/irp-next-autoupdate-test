@@ -1,7 +1,7 @@
 from enum import Enum
 from dataclasses import dataclass, field
 from typing import List, Any, Optional, Callable, Dict
-from .validators import validate_email
+from .validators import validate_email, validate_port
 
 class SettingType(Enum):
     BOOLEAN = "boolean"
@@ -14,6 +14,7 @@ class SettingType(Enum):
     DESCRIPTION = "description"
     BUTTON = "button"
     ROW = "row"
+    INPUT_PAIR = "input_pair"
 
 @dataclass
 class SettingField:
@@ -346,6 +347,36 @@ SCHEMA = [
                 type=SettingType.BOOLEAN,
                 default=False,
                 tooltip="Keep the console window on top of other windows."
+            ),
+        ]
+    ),
+    SettingCategory(
+        name="Network Settings",
+        key="network_settings",
+        fields=[
+            SettingField(
+                key="port",
+                label="Port",
+                type=SettingType.INTEGER,
+                default=7777,
+                tooltip="Port for the local API server.",
+                validator=validate_port,
+            ),
+            SettingField(
+                key="use_api_keys",
+                label="Use API Keys",
+                type=SettingType.BOOLEAN,
+                default=False,
+                tooltip="Require an API key (Bearer) for incoming requests.",
+            ),
+            SettingField(
+                key="api_keys",
+                label="API Keys",
+                type=SettingType.INPUT_PAIR,
+                default=[],
+                tooltip="List of API key name/value pairs.",
+                depends="network_settings.use_api_keys",
+                required=True,
             ),
         ]
     ),

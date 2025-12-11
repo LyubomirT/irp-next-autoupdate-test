@@ -32,6 +32,36 @@ class API:
     def setup_routes(self):
         @self.app.post("/v1/chat/completions")
         async def chat_completions(request: ChatCompletionRequest, raw_request: Request):
+            # Optional API key authentication (Bearer token)
+            cfg = getattr(self.driver, "config_manager", None)
+            if cfg and cfg.get_setting("network_settings", "use_api_keys"):
+                auth_header = raw_request.headers.get("Authorization") or ""
+                if not auth_header.lower().startswith("bearer "):
+                    raise HTTPException(status_code=401, detail="Missing API key")
+
+                token = auth_header.split(" ", 1)[1].strip()
+                pairs = cfg.get_setting("network_settings", "api_keys") or []
+
+                matched_name = None
+                for p in pairs:
+                    name = ""
+                    key_val = ""
+                    if isinstance(p, dict):
+                        name = str(p.get("name", ""))
+                        key_val = str(p.get("key", ""))
+                    elif isinstance(p, (list, tuple)) and len(p) >= 2:
+                        name = str(p[0])
+                        key_val = str(p[1])
+
+                    if key_val and token == key_val:
+                        matched_name = name or "Unnamed"
+                        break
+
+                if not matched_name:
+                    raise HTTPException(status_code=401, detail="Invalid API key")
+
+                Logger.info(f"Authenticated request using API key: {matched_name}")
+
             if not self.driver.is_running:
                 raise HTTPException(status_code=503, detail="DeepSeek Driver is not running")
 

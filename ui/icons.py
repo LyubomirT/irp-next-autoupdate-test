@@ -11,6 +11,7 @@ class IconType(Enum):
     CANCEL = "x.svg"
     SETTINGS = "settings.svg"
     SEARCH = "search.svg"
+    PLUS = "plus.svg"
 
 class IconUtils:
     @staticmethod

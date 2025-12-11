@@ -3,6 +3,7 @@ from PySide6.QtCore import Property, QSize, Qt, QRect, Signal, QEvent
 import os
 from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QIcon
 from .brand import BrandColors
+from .icons import IconUtils, IconType
 
 class MultiColumnRow(QWidget):
     def __init__(self, widgets, ratios=None, spacing=10, parent=None):
@@ -340,6 +341,168 @@ class StyledLineEdit(QLineEdit):
                 opacity: 0.6;
             }}
         """)
+
+
+class InputPairRow(QWidget):
+    """A single 50/50 split input pair with a remove (X) button."""
+
+    def __init__(self, left_text: str = "", right_text: str = "", left_placeholder: str = "", right_placeholder: str = "", parent=None):
+        super().__init__(parent)
+        self.setStyleSheet("background-color: transparent;")
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self.left_input = StyledLineEdit()
+        self.left_input.setPlaceholderText(left_placeholder)
+        self.left_input.setText(left_text)
+
+        self.right_input = StyledLineEdit()
+        self.right_input.setPlaceholderText(right_placeholder)
+        self.right_input.setText(right_text)
+
+        layout.addWidget(self.left_input, 1)
+        layout.addWidget(self.right_input, 1)
+
+        self.remove_button = QPushButton()
+        self.remove_button.setCursor(Qt.PointingHandCursor)
+        self.remove_button.setFixedSize(28, 28)
+        self.remove_button.setIconSize(QSize(12, 12))
+        self.remove_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: 1px solid {BrandColors.INPUT_BORDER};
+                border-radius: 6px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {BrandColors.ITEM_HOVER};
+                border: 1px solid {BrandColors.DANGER};
+            }}
+            QPushButton:disabled {{
+                border: 1px solid {BrandColors.INPUT_BORDER};
+                opacity: 0.4;
+            }}
+        """)
+        IconUtils.apply_icon(self.remove_button, IconType.CANCEL, BrandColors.TEXT_PRIMARY, size=12)
+
+        layout.addWidget(self.remove_button, 0)
+
+    def get_pair(self):
+        return (self.left_input.text(), self.right_input.text())
+
+    def set_pair(self, left_text: str, right_text: str):
+        self.left_input.setText(left_text)
+        self.right_input.setText(right_text)
+
+
+class InputPairsWidget(QWidget):
+    """A vertical list of InputPairRow items with an Add Pair button."""
+
+    pairsChanged = Signal()
+
+    def __init__(self, parent=None, left_placeholder: str = "Name", right_placeholder: str = "Key"):
+        super().__init__(parent)
+        self._rows: list[InputPairRow] = []
+        self._left_placeholder = left_placeholder
+        self._right_placeholder = right_placeholder
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        self._rows_layout = QVBoxLayout()
+        self._rows_layout.setContentsMargins(0, 0, 0, 0)
+        self._rows_layout.setSpacing(6)
+        layout.addLayout(self._rows_layout)
+
+        self.add_button = StyledButton("Add Pair")
+        IconUtils.apply_icon(self.add_button, IconType.PLUS, BrandColors.TEXT_PRIMARY, size=14)
+        self.add_button.setIconSize(QSize(14, 14))
+        # clicked(bool) passes a checked arg; ignore it.
+        self.add_button.clicked.connect(lambda: self.add_pair())
+        layout.addWidget(self.add_button, 0, Qt.AlignLeft)
+
+        # Ensure at least one pair exists by default.
+        self.add_pair(emit_change=False)
+
+    def add_pair(self, left_text: str = "", right_text: str = "", emit_change: bool = True):
+        row = InputPairRow(
+            left_text=left_text,
+            right_text=right_text,
+            left_placeholder=self._left_placeholder,
+            right_placeholder=self._right_placeholder
+        )
+
+        # textChanged(str) passes an argument; ignore it.
+        row.left_input.textChanged.connect(lambda *_: self.pairsChanged.emit())
+        row.right_input.textChanged.connect(lambda *_: self.pairsChanged.emit())
+        row.remove_button.clicked.connect(lambda: self.remove_pair(row))
+
+        self._rows.append(row)
+        self._rows_layout.addWidget(row)
+        self._update_remove_buttons()
+        self.updateGeometry()
+
+        if emit_change:
+            self.pairsChanged.emit()
+
+    def remove_pair(self, row: InputPairRow):
+        if len(self._rows) <= 1:
+            return
+
+        self._rows_layout.removeWidget(row)
+        self._rows.remove(row)
+        row.setParent(None)
+        row.deleteLater()
+
+        self._update_remove_buttons()
+        self.updateGeometry()
+        self.pairsChanged.emit()
+
+    def _update_remove_buttons(self):
+        # Don't allow removing the last remaining pair.
+        disable_remove = len(self._rows) <= 1
+        for r in self._rows:
+            r.remove_button.setEnabled(not disable_remove)
+
+    def get_pairs(self):
+        return [list(r.get_pair()) for r in self._rows]
+
+    def set_pairs(self, pairs):
+        # Clear existing rows.
+        for r in self._rows:
+            self._rows_layout.removeWidget(r)
+            r.setParent(None)
+            r.deleteLater()
+        self._rows = []
+
+        if pairs:
+            for p in pairs:
+                left_text = ""
+                right_text = ""
+                if isinstance(p, dict):
+                    left_text = str(p.get("name", ""))
+                    right_text = str(p.get("key", ""))
+                elif isinstance(p, (list, tuple)) and len(p) >= 2:
+                    left_text = str(p[0])
+                    right_text = str(p[1])
+                self.add_pair(left_text, right_text, emit_change=False)
+
+        if not self._rows:
+            self.add_pair(emit_change=False)
+
+        self._update_remove_buttons()
+        self.updateGeometry()
+
+    def setEnabled(self, enabled: bool):
+        super().setEnabled(enabled)
+        for r in self._rows:
+            r.left_input.setEnabled(enabled)
+            r.right_input.setEnabled(enabled)
+            r.remove_button.setEnabled(enabled and len(self._rows) > 1)
+        self.add_button.setEnabled(enabled)
 
 
 class SettingRow(QWidget):

@@ -247,8 +247,13 @@ class MainWindow(QMainWindow):
             self.api = API(self.driver)
             
             # Configure Uvicorn
-            config = uvicorn.Config(app=self.api.app, host="127.0.0.1", port=7777, log_level="info")
-            # 7777 for now because 8000 is used by SillyTavern
+            port_setting = self.config_manager.get_setting("network_settings", "port")
+            try:
+                port = int(port_setting) if port_setting else 7777
+            except (TypeError, ValueError):
+                port = 7777
+
+            config = uvicorn.Config(app=self.api.app, host="127.0.0.1", port=port, log_level="info")
             self.server = uvicorn.Server(config)
             
             # Start Driver
@@ -260,7 +265,7 @@ class MainWindow(QMainWindow):
             # We run server.serve() as a task because it blocks
             self.server_task = asyncio.create_task(self.server.serve())
             
-            self._update_status("Running (Port 7777)", "running")
+            self._update_status(f"Running (Port {port})", "running")
             self.start_button.setText("Stop")
             IconUtils.apply_icon(self.start_button, IconType.STOP, BrandColors.TEXT_PRIMARY)
             self.start_button.setEnabled(True)

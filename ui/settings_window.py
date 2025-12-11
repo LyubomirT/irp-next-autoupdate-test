@@ -10,7 +10,7 @@ import os
 from config.manager import ConfigManager
 from config.schema import SCHEMA, SettingType
 from .brand import BrandColors
-from .components import Tumbler, StyledLineEdit, StyledTextEdit, StyledComboBox, Divider, Description, StyledButton, MultiColumnRow, SettingRow, ToggleRow
+from .components import Tumbler, StyledLineEdit, StyledTextEdit, StyledComboBox, Divider, Description, StyledButton, MultiColumnRow, SettingRow, ToggleRow, InputPairsWidget
 from .icons import IconUtils, IconType
 from utils.logger import Logger
 
@@ -53,6 +53,9 @@ class SettingsWindow(QMainWindow):
             # Specific logic for formatting preset
             if field.key == "formatting_preset":
                 widget.currentTextChanged.connect(self._on_preset_changed)
+        elif field.type == SettingType.INPUT_PAIR:
+            widget = InputPairsWidget()
+            widget.pairsChanged.connect(self._on_setting_changed)
                 
         elif field.type == SettingType.BUTTON:
             widget = StyledButton(field.label)
@@ -425,6 +428,8 @@ class SettingsWindow(QMainWindow):
                     elif field.type == SettingType.DROPDOWN:
                         if value and value in field.options:
                             widget.setCurrentText(value)
+                    elif field.type == SettingType.INPUT_PAIR:
+                        widget.set_pairs(value or [])
                     widget.blockSignals(False)
         
         self._update_dependencies()
@@ -702,6 +707,8 @@ class SettingsWindow(QMainWindow):
                         value = widget.toPlainText()
                     elif field.type == SettingType.DROPDOWN:
                         value = widget.currentText()
+                    elif field.type == SettingType.INPUT_PAIR:
+                        value = widget.get_pairs()
                     elif field.type in [SettingType.BUTTON, SettingType.DIVIDER, SettingType.DESCRIPTION, SettingType.ROW]:
                         continue # These don't have values to save
                         
