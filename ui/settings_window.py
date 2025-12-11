@@ -1,9 +1,12 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QListWidget, 
     QScrollArea, QLabel, QPushButton, QFrame, QMessageBox, QDialog,
-    QLineEdit, QTextEdit, QComboBox
+    QLineEdit, QTextEdit, QComboBox, QGraphicsColorizeEffect
 )
 from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtGui import QIcon, QColor
+from difflib import SequenceMatcher
+import os
 from config.manager import ConfigManager
 from config.schema import SCHEMA, SettingType
 from .brand import BrandColors
@@ -81,7 +84,13 @@ class SettingsWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Left Sidebar (Categories)
+        # Left Sidebar (Categories + Search)
+        left_widget = QWidget()
+        left_widget.setFixedWidth(250)
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
+
         self.category_list = QListWidget()
         self.category_list.setFixedWidth(250)
         self.category_list.setStyleSheet(f"""
@@ -114,7 +123,44 @@ class SettingsWindow(QMainWindow):
             }}
         """)
         self.category_list.itemClicked.connect(self._on_category_clicked)
-        main_layout.addWidget(self.category_list)
+        left_layout.addWidget(self.category_list, 1)
+
+        # Search bar at bottom of sidebar
+        self.search_bar = QWidget()
+        self.search_bar.setStyleSheet(f"""
+            QWidget {{
+                background-color: {BrandColors.SIDEBAR_BG};
+                border-top: 1px solid {BrandColors.INPUT_BORDER};
+            }}
+        """)
+        search_layout = QHBoxLayout(self.search_bar)
+        search_layout.setContentsMargins(8, 6, 8, 6)
+        search_layout.setSpacing(6)
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search settings…")
+        self.search_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {BrandColors.INPUT_BG};
+                color: {BrandColors.TEXT_PRIMARY};
+                border: 2px solid {BrandColors.INPUT_BORDER};
+                border-radius: 6px;
+                padding: 6px 10px 6px 28px;
+                font-size: {BrandColors.FONT_SIZE_REGULAR};
+                font-family: {BrandColors.FONT_FAMILY};
+            }}
+            QLineEdit:focus {{
+                border: 2px solid {BrandColors.ACCENT};
+            }}
+        """)
+        icons_base = os.path.join(os.path.dirname(__file__), "assets", "icons")
+        search_icon_path = os.path.join(icons_base, "search.svg")
+        self.search_input.addAction(QIcon(search_icon_path), QLineEdit.LeadingPosition)
+        self.search_input.textChanged.connect(self._on_search_text_changed)
+        search_layout.addWidget(self.search_input, 1)
+
+        left_layout.addWidget(self.search_bar, 0)
+        main_layout.addWidget(left_widget)
 
         # Right Content Area
         right_widget = QWidget()
@@ -168,6 +214,7 @@ class SettingsWindow(QMainWindow):
         self.scroll_layout.setAlignment(Qt.AlignTop)
         
         self.category_widgets = {} # Map category key -> widget (for scrolling)
+        self.search_targets = []  # List of searchable setting widgets
 
         # Generate Fields
         for category in SCHEMA:
@@ -239,6 +286,7 @@ class SettingsWindow(QMainWindow):
                     field_layout.addWidget(widget)
                     self.field_widgets[f"{category.key}.{field.key}"] = widget
                     card_layout.addWidget(field_container)
+                    self._add_search_target(category, field, field_container)
                     continue
                 
                 # Handle ROW type (multiple controls in one row)
@@ -256,6 +304,7 @@ class SettingsWindow(QMainWindow):
                     row = SettingRow(field.label, widget, field.tooltip)
                     self.setting_rows[f"{category.key}.{field.key}"] = row
                     card_layout.addWidget(row)
+                    self._add_search_target(category, field, row)
                     continue
                 
                 # Standard field types - use appropriate row layout
@@ -270,6 +319,8 @@ class SettingsWindow(QMainWindow):
                         row = SettingRow(field.label, widget, field.tooltip)
                     self.setting_rows[f"{category.key}.{field.key}"] = row
                     card_layout.addWidget(row)
+                    if field.type != SettingType.BUTTON:
+                        self._add_search_target(category, field, row)
             
             self.scroll_layout.addWidget(card)
 
@@ -341,6 +392,21 @@ class SettingsWindow(QMainWindow):
         self.update_timer.setInterval(100)
         self.update_timer.timeout.connect(self._update_dependencies)
 
+        # Debounce timer for settings search
+        self.search_timer = QTimer()
+        self.search_timer.setSingleShot(True)
+        self.search_timer.setInterval(300)
+        self.search_timer.timeout.connect(self._perform_search)
+
+        # Flash state for search highlight
+        self._flashed_widget = None
+        self._flashed_original_style = ""
+        self._flashed_original_effect = None
+        self._flash_reset_timer = QTimer()
+        self._flash_reset_timer.setSingleShot(True)
+        self._flash_reset_timer.setInterval(1000)
+        self._flash_reset_timer.timeout.connect(self._clear_flash)
+
     def _load_values(self):
         for category in SCHEMA:
             for field in self._iter_fields(category.fields):
@@ -400,6 +466,111 @@ class SettingsWindow(QMainWindow):
                         widget.setEnabled(is_met)
                     if not is_met and isinstance(widget, StyledLineEdit):
                         widget.set_error(False) # Clear error if disabled
+
+    def _add_search_target(self, category, field, widget):
+        extra_labels = ""
+        if field.type == SettingType.ROW and field.sub_fields:
+            extra_labels = " ".join(sub.label for sub in field.sub_fields if sub.label)
+
+        self.search_targets.append({
+            "label_lower": (field.label or "").lower(),
+            "key_lower": (field.key or "").lower(),
+            "category_lower": (category.name or "").lower(),
+            "category_key_lower": (category.key or "").lower(),
+            "extra_lower": extra_labels.lower(),
+            "widget": widget,
+        })
+
+    def _on_search_text_changed(self, text):
+        self.search_timer.stop()
+        if text.strip():
+            self.search_timer.start()
+        else:
+            self._clear_flash()
+
+    def _score_match(self, query: str, target: dict) -> float:
+        candidates = [
+            target.get("label_lower", ""),
+            target.get("key_lower", ""),
+            target.get("category_lower", ""),
+            target.get("category_key_lower", ""),
+            target.get("extra_lower", ""),
+        ]
+
+        best = 0.0
+        for cand in candidates:
+            if not cand:
+                continue
+            if query == cand:
+                best = max(best, 1.0)
+                continue
+            if cand.startswith(query):
+                best = max(best, 0.95)
+                continue
+            if query in cand:
+                idx = cand.find(query)
+                best = max(best, 0.85 + (1 - idx / max(len(cand), 1)) * 0.1)
+                continue
+
+            ratio = SequenceMatcher(None, query, cand).ratio()
+            best = max(best, ratio * 0.8)
+
+        return best
+
+    def _perform_search(self):
+        query = self.search_input.text().strip().lower()
+        if not query:
+            return
+
+        best_target = None
+        best_score = 0.0
+
+        for target in self.search_targets:
+            score = self._score_match(query, target)
+            if score > best_score:
+                best_score = score
+                best_target = target
+
+        if best_target and best_score >= 0.25:
+            widget = best_target["widget"]
+            self.scroll_area.ensureWidgetVisible(widget)
+            self._flash_widget(widget)
+
+    def _flash_widget(self, widget):
+        if self._flashed_widget is widget:
+            # Already flashed; just restart the timer.
+            self._flash_reset_timer.start()
+            return
+
+        if self._flashed_widget:
+            self._flashed_widget.setStyleSheet(self._flashed_original_style)
+            self._flashed_widget.setGraphicsEffect(self._flashed_original_effect)
+
+        self._flashed_widget = widget
+        self._flashed_original_style = widget.styleSheet()
+        self._flashed_original_effect = widget.graphicsEffect()
+
+        tint_bg = "rgba(88, 149, 252, 0.10)"
+        widget.setStyleSheet(
+            self._flashed_original_style +
+            f"\nbackground-color: {tint_bg};"
+            f"\nborder: 2px solid {BrandColors.ACCENT};"
+            "\nborder-radius: 6px;"
+        )
+
+        effect = QGraphicsColorizeEffect()
+        effect.setColor(QColor(BrandColors.ACCENT))
+        effect.setStrength(0.15)
+        widget.setGraphicsEffect(effect)
+        self._flash_reset_timer.start()
+
+    def _clear_flash(self):
+        if self._flashed_widget:
+            self._flashed_widget.setStyleSheet(self._flashed_original_style)
+            self._flashed_widget.setGraphicsEffect(self._flashed_original_effect)
+        self._flashed_widget = None
+        self._flashed_original_style = ""
+        self._flashed_original_effect = None
 
     def _on_category_clicked(self, item):
         self.is_auto_scrolling = True

@@ -10,6 +10,7 @@ class IconType(Enum):
     CONFIRM = "check.svg"
     CANCEL = "x.svg"
     SETTINGS = "settings.svg"
+    SEARCH = "search.svg"
 
 class IconUtils:
     @staticmethod
