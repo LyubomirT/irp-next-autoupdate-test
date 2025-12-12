@@ -341,6 +341,13 @@ class MainWindow(QMainWindow):
         Logger.info("Window closing, shutting down...")
         # qasync loop runs until the window closes usually, but we need to await the cleanup.
         
+        # If the settings window is open, close it too. If the user cancels the
+        # "unsaved changes" prompt, abort quitting the app.
+        if self.settings_window and self.settings_window.isVisible():
+            if not self.settings_window.close():
+                event.ignore()
+                return
+        
         status_text = self.status_label.text()
         if any(state in status_text for state in ["Stopped", "Ready", "Browser Closed/Crashed"]):
             # Close console window if open
@@ -365,9 +372,10 @@ class MainWindow(QMainWindow):
                 self.console_window.force_close()
                 self.console_window = None
             
-            # Close settings window if open
-            if self.settings_window:
-                self.settings_window.close()
+            # If the settings window got opened during shutdown, try to close it.
+            if self.settings_window and self.settings_window.isVisible():
+                if not self.settings_window.close():
+                    return
                 
             self.close()
             
