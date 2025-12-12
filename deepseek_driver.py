@@ -5,6 +5,7 @@ import asyncio
 import re
 import httpx
 import tempfile
+from pathlib import Path
 from typing import List, Union, Any, Dict
 from patchright.async_api import async_playwright, Page, Browser, BrowserContext
 from dotenv import load_dotenv
@@ -30,22 +31,47 @@ class DeepSeekDriver:
         self.current_abort_event: asyncio.Event = None
         self.abort_requested = False
 
+    def _get_persistent_profile_dir(self) -> str:
+        config_dir = getattr(self.config_manager, "config_dir", None)
+        base_dir = Path(config_dir) if config_dir is not None else Path("config_data")
+        return str((base_dir / "playwright_profiles" / "deepseek").resolve())
+
     async def start(self):
         """
         Starts the browser and navigates to DeepSeek.
         """
         Logger.info("Starting DeepSeek Driver...")
         self.playwright = await async_playwright().start()
-        # Launch Chromium
-        # headless=False to see the browser
-        Logger.info("Launching Chromium...")
-        self.browser = await self.playwright.chromium.launch(headless=False)
-        
-        # Create a new context
-        self.context = await self.browser.new_context()
-        
-        # Create a new page
-        self.page = await self.context.new_page()
+        persistent_sessions = bool(self.config_manager.get_setting("system_settings", "persistent_sessions"))
+
+        if persistent_sessions:
+            user_data_dir = self._get_persistent_profile_dir()
+            Logger.info("Launching Chromium (Persistent Sessions enabled)...")
+            Logger.debug(f"Persistent profile dir: {user_data_dir}")
+
+            try:
+                os.makedirs(user_data_dir, exist_ok=True)
+                self.context = await self.playwright.chromium.launch_persistent_context(user_data_dir, headless=False)
+                context_browser = getattr(self.context, "browser", None)
+                self.browser = context_browser() if callable(context_browser) else context_browser
+            except Exception as e:
+                Logger.error(f"Failed to launch persistent context: {e}")
+                Logger.warning("Falling back to non-persistent session...")
+                self.browser = await self.playwright.chromium.launch(headless=False)
+                self.context = await self.browser.new_context()
+        else:
+            # Launch Chromium
+            # headless=False to see the browser
+            Logger.info("Launching Chromium...")
+            self.browser = await self.playwright.chromium.launch(headless=False)
+            self.context = await self.browser.new_context()
+
+        # Create or reuse a page
+        try:
+            pages = getattr(self.context, "pages", [])
+            self.page = pages[0] if pages else await self.context.new_page()
+        except Exception:
+            self.page = await self.context.new_page()
         
         Logger.info("Navigating to https://chat.deepseek.com/ ...")
         await self.page.goto("https://chat.deepseek.com/")
@@ -125,11 +151,20 @@ class DeepSeekDriver:
         Logger.info("Closing DeepSeek Driver...")
         self.monitoring_active = False
         if self.context:
-            await self.context.close()
+            try:
+                await self.context.close()
+            except Exception as e:
+                Logger.debug(f"Error closing browser context: {e}")
         if self.browser:
-            await self.browser.close()
+            try:
+                await self.browser.close()
+            except Exception as e:
+                Logger.debug(f"Error closing browser: {e}")
         if self.playwright:
-            await self.playwright.stop()
+            try:
+                await self.playwright.stop()
+            except Exception as e:
+                Logger.debug(f"Error stopping Playwright: {e}")
         self.is_running = False
         Logger.info("DeepSeek Driver closed.")
 

@@ -7,6 +7,8 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QIcon, QColor
 from difflib import SequenceMatcher
 import os
+import shutil
+from pathlib import Path
 from config.manager import ConfigManager
 from config.schema import SCHEMA, SettingType
 from .brand import BrandColors
@@ -67,6 +69,8 @@ class SettingsWindow(QMainWindow):
                 widget.clicked.connect(self._reset_injection)
             elif field.action == "reset_formatting":
                 widget.clicked.connect(self._reset_formatting)
+            elif field.action == "clear_persistent_profile":
+                widget.clicked.connect(self._clear_persistent_profile)
         
         if widget:
             self.field_widgets[f"{category_key}.{field.key}"] = widget
@@ -685,6 +689,50 @@ class SettingsWindow(QMainWindow):
         
         if content_widget:
             content_widget.setPlainText("[Important Instructions]")
+
+    def _get_persistent_profile_dir(self) -> Path:
+        config_dir = getattr(self.config_manager, "config_dir", None)
+        base_dir = Path(config_dir) if config_dir is not None else Path("config_data")
+        return (base_dir.resolve() / "playwright_profiles" / "deepseek")
+
+    def _clear_persistent_profile(self):
+        profile_dir = self._get_persistent_profile_dir()
+        base_dir = Path(getattr(self.config_manager, "config_dir", "config_data")).resolve()
+
+        try:
+            profile_dir.resolve().relative_to(base_dir)
+        except Exception:
+            QMessageBox.warning(
+                self,
+                "Clear Profile",
+                "Refusing to clear profile: resolved path is outside the config directory."
+            )
+            return
+
+        if not profile_dir.exists():
+            QMessageBox.information(self, "Clear Profile", "No saved browser profile was found.")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Clear Profile",
+            "This will delete the saved browser profile used for Persistent Sessions.\n\n"
+            "This removes cookies/local storage and will log you out.\n\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            shutil.rmtree(profile_dir)
+            Logger.success("Persistent profile cleared.")
+            QMessageBox.information(self, "Clear Profile", "Profile cleared successfully.")
+        except Exception as e:
+            Logger.error(f"Error clearing persistent profile: {e}")
+            QMessageBox.warning(self, "Clear Profile", f"Failed to clear profile:\n\n{e}")
 
     def save_settings(self):
         validation_errors = []

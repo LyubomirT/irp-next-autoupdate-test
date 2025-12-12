@@ -313,6 +313,21 @@ SCHEMA = [
                 default=False,
                 tooltip="Show a console window for viewing application logs."
             ),
+            SettingField(
+                key="persistent_sessions",
+                label="Persistent Sessions",
+                type=SettingType.BOOLEAN,
+                default=False,
+                tooltip="Reuse a persistent Playwright browser profile so logins persist between restarts."
+            ),
+            SettingField(
+                key="clear_persistent_profile",
+                label="Clear Profile",
+                type=SettingType.BUTTON,
+                default="Clear",
+                action="clear_persistent_profile",
+                tooltip="Delete the saved browser profile used for Persistent Sessions (logs you out)."
+            ),
         ]
     ),
     SettingCategory(
