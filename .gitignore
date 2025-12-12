@@ -8,3 +8,4 @@ AGENTS.md
 config_data/
 cache/
 logs/
+config_dir.txt

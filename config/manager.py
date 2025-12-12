@@ -1,15 +1,16 @@
 import json
-import os
 from pathlib import Path
 from typing import Any, Dict
 from cryptography.fernet import Fernet
 from .schema import SCHEMA, SettingType
 from .migrator import SettingsMigrator
+from .location import get_active_config_dir
 from utils.logger import Logger
 
 class ConfigManager:
-    def __init__(self, config_dir: str = "config_data"):
-        self.config_dir = Path(config_dir)
+    def __init__(self, config_dir: str | Path | None = None):
+        self.config_dir = Path(config_dir) if config_dir is not None else get_active_config_dir()
+        self.config_dir = self.config_dir.resolve()
         self.settings_file = self.config_dir / "settings.json.enc"
         self.key_file = self.config_dir / "settings.key"
         self.settings: Dict[str, Any] = {}

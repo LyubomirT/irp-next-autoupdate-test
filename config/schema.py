@@ -2,6 +2,7 @@ from enum import Enum
 from dataclasses import dataclass, field
 from typing import List, Any, Optional, Callable, Dict
 from .validators import validate_email, validate_port
+from .location import get_config_storage_options
 
 class SettingType(Enum):
     BOOLEAN = "boolean"
@@ -327,6 +328,33 @@ SCHEMA = [
                 default="Clear",
                 action="clear_persistent_profile",
                 tooltip="Delete the saved browser profile used for Persistent Sessions (logs you out)."
+            ),
+            SettingField(
+                key="config_storage_divider",
+                label="Config Storage",
+                type=SettingType.DIVIDER,
+                default=None,
+            ),
+            SettingField(
+                key="config_storage_location",
+                label="Config Storage Location",
+                type=SettingType.DROPDOWN,
+                default="Relative",
+                options=get_config_storage_options(),
+                tooltip=(
+                    "Choose where to store configuration data (settings/key/profiles). "
+                    "Changing this will migrate the config directory and restart the app."
+                ),
+            ),
+            SettingField(
+                key="config_storage_custom_path",
+                label="Custom Config Directory",
+                type=SettingType.STRING,
+                default="",
+                tooltip=(
+                    "Used when Config Storage Location is Custom. "
+                    "Absolute paths are recommended; relative paths are resolved from the app folder."
+                ),
             ),
         ]
     ),

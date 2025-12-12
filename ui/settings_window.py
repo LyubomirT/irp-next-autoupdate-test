@@ -10,6 +10,7 @@ import os
 import shutil
 from pathlib import Path
 from config.manager import ConfigManager
+from config.location import infer_preset_from_config_dir, migrate_config_dir, resolve_config_dir, write_pointer_file
 from config.schema import SCHEMA, SettingType
 from .brand import BrandColors
 from .components import Tumbler, StyledLineEdit, StyledTextEdit, StyledComboBox, Divider, Description, StyledButton, MultiColumnRow, SettingRow, ToggleRow, InputPairsWidget
@@ -18,6 +19,7 @@ from utils.logger import Logger
 
 class SettingsWindow(QMainWindow):
     settings_saved = Signal()
+    restart_requested = Signal()
 
     def __init__(self, config_manager: ConfigManager, parent=None):
         super().__init__(parent)
@@ -45,6 +47,9 @@ class SettingsWindow(QMainWindow):
             elif field.type == SettingType.INTEGER:
                 from PySide6.QtGui import QIntValidator
                 widget.setValidator(QIntValidator())
+
+            if field.key == "config_storage_custom_path":
+                widget.setPlaceholderText("Custom config directory…")
             widget.textChanged.connect(self._on_setting_changed)
         elif field.type == SettingType.DROPDOWN:
             widget = StyledComboBox()
@@ -55,6 +60,8 @@ class SettingsWindow(QMainWindow):
             # Specific logic for formatting preset
             if field.key == "formatting_preset":
                 widget.currentTextChanged.connect(self._on_preset_changed)
+            elif field.key == "config_storage_location":
+                widget.currentTextChanged.connect(self._on_config_storage_location_changed)
         elif field.type == SettingType.INPUT_PAIR:
             widget = InputPairsWidget()
             widget.pairsChanged.connect(self._on_setting_changed)
@@ -441,6 +448,8 @@ class SettingsWindow(QMainWindow):
         preset_widget = self.field_widgets.get("formatting.formatting_preset")
         if preset_widget:
             self._on_preset_changed(preset_widget.currentText())
+
+        self._sync_config_storage_from_active_dir()
             
         self.unsaved_changes = False
 
@@ -642,6 +651,42 @@ class SettingsWindow(QMainWindow):
                     self.category_list.setCurrentItem(item)
                     self.category_list.blockSignals(False)
 
+    def _sync_config_storage_from_active_dir(self):
+        preset_widget = self.field_widgets.get("system_settings.config_storage_location")
+        custom_widget = self.field_widgets.get("system_settings.config_storage_custom_path")
+        if not preset_widget or not custom_widget:
+            return
+
+        active_dir = Path(getattr(self.config_manager, "config_dir", "config_data")).resolve()
+        preset, custom_path = infer_preset_from_config_dir(active_dir)
+
+        preset_widget.blockSignals(True)
+        options = [preset_widget.itemText(i) for i in range(preset_widget.count())]
+        preset_to_apply = preset if preset in options else "Custom"
+        preset_widget.setCurrentText(preset_to_apply)
+        preset_widget.blockSignals(False)
+
+        if preset_to_apply == "Custom":
+            custom_widget.blockSignals(True)
+            custom_widget.setText(custom_path)
+            custom_widget.blockSignals(False)
+
+        self._on_config_storage_location_changed(preset_to_apply)
+
+    def _on_config_storage_location_changed(self, text: str):
+        is_custom = text == "Custom"
+        custom_key = "system_settings.config_storage_custom_path"
+        row = self.setting_rows.get(custom_key)
+        widget = self.field_widgets.get(custom_key)
+
+        if row:
+            row.setEnabled(is_custom)
+        elif widget:
+            widget.setEnabled(is_custom)
+
+        if not is_custom and isinstance(widget, StyledLineEdit):
+            widget.set_error(False)
+
     def _on_preset_changed(self, text):
         template_widget = self.field_widgets.get("formatting.formatting_template")
         if not template_widget:
@@ -736,6 +781,27 @@ class SettingsWindow(QMainWindow):
 
     def save_settings(self):
         validation_errors = []
+
+        active_config_dir = Path(getattr(self.config_manager, "config_dir", "config_data")).resolve()
+        storage_preset_widget = self.field_widgets.get("system_settings.config_storage_location")
+        storage_custom_widget = self.field_widgets.get("system_settings.config_storage_custom_path")
+
+        requested_preset = storage_preset_widget.currentText() if storage_preset_widget else "Relative"
+        requested_custom_path = storage_custom_widget.text() if storage_custom_widget else ""
+
+        prev_preset = self.config_manager.get_setting("system_settings", "config_storage_location")
+        prev_custom_path = self.config_manager.get_setting("system_settings", "config_storage_custom_path")
+
+        target_config_dir = None
+        try:
+            target_config_dir = resolve_config_dir(requested_preset, requested_custom_path).resolve()
+        except Exception as e:
+            if isinstance(storage_custom_widget, StyledLineEdit):
+                storage_custom_widget.set_error(True)
+            validation_errors.append(f"Config Storage Location: {e}")
+        else:
+            if isinstance(storage_custom_widget, StyledLineEdit):
+                storage_custom_widget.set_error(False)
         
         for category in SCHEMA:
             for field in self._iter_fields(category.fields):
@@ -802,10 +868,75 @@ class SettingsWindow(QMainWindow):
             QMessageBox.warning(self, "Validation Error", f"Please fix the following errors:\n\n{error_msg}")
             return
 
+        perform_migration = False
+        if target_config_dir and target_config_dir != active_config_dir:
+            reply = QMessageBox.question(
+                self,
+                "Move Config Storage",
+                "You're about to change where configuration data is stored.\n\n"
+                f"From:\n{active_config_dir}\n\n"
+                f"To:\n{target_config_dir}\n\n"
+                "This will save all settings, replace the destination directory contents, "
+                "and restart the application.\n\n"
+                "Continue?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+
+            if reply != QMessageBox.Yes:
+                rollback_preset = prev_preset or infer_preset_from_config_dir(active_config_dir)[0]
+                rollback_custom = prev_custom_path or infer_preset_from_config_dir(active_config_dir)[1]
+                if storage_preset_widget:
+                    storage_preset_widget.blockSignals(True)
+                    storage_preset_widget.setCurrentText(rollback_preset)
+                    storage_preset_widget.blockSignals(False)
+                if storage_custom_widget:
+                    storage_custom_widget.blockSignals(True)
+                    storage_custom_widget.setText(rollback_custom)
+                    storage_custom_widget.blockSignals(False)
+
+                self._on_config_storage_location_changed(rollback_preset)
+                self.config_manager.set_setting("system_settings", "config_storage_location", rollback_preset)
+                self.config_manager.set_setting("system_settings", "config_storage_custom_path", rollback_custom)
+                target_config_dir = active_config_dir
+            else:
+                perform_migration = True
+
         self.config_manager.save_settings()
         self.unsaved_changes = False
         self.settings_saved.emit()
-        self.close()
+
+        if not perform_migration:
+            self.close()
+            return
+
+        try:
+            migrate_config_dir(active_config_dir, target_config_dir)
+            write_pointer_file(target_config_dir)
+            QMessageBox.information(
+                self,
+                "Config Storage",
+                "Configuration migrated successfully.\n\nRestarting now...",
+            )
+            self.restart_requested.emit()
+            self.close()
+        except Exception as e:
+            Logger.error(f"Config migration failed: {e}")
+
+            rollback_preset = prev_preset or infer_preset_from_config_dir(active_config_dir)[0]
+            rollback_custom = prev_custom_path or infer_preset_from_config_dir(active_config_dir)[1]
+            self.config_manager.set_setting("system_settings", "config_storage_location", rollback_preset)
+            self.config_manager.set_setting("system_settings", "config_storage_custom_path", rollback_custom)
+            self.config_manager.save_settings()
+
+            self._sync_config_storage_from_active_dir()
+            QMessageBox.warning(
+                self,
+                "Config Migration Failed",
+                "Failed to migrate configuration to the new location.\n\n"
+                f"Error:\n{e}",
+            )
+            return
 
     def closeEvent(self, event):
         if self.unsaved_changes:

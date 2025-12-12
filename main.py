@@ -2,11 +2,12 @@ import sys
 import asyncio
 import uvicorn
 import os
+from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, 
     QHBoxLayout, QSizePolicy
 )
-from PySide6.QtCore import Slot, Qt
+from PySide6.QtCore import Slot, Qt, QProcess
 import qasync
 
 from deepseek_driver import DeepSeekDriver
@@ -210,6 +211,7 @@ class MainWindow(QMainWindow):
             # Pass None as parent to make it a top-level window with its own taskbar icon
             self.settings_window = SettingsWindow(self.config_manager, None)
             self.settings_window.settings_saved.connect(self.on_settings_saved)
+            self.settings_window.restart_requested.connect(self.on_restart_requested)
         self.settings_window.show()
         self.settings_window.activateWindow() # Bring to front
 
@@ -225,6 +227,47 @@ class MainWindow(QMainWindow):
             
         # If driver is running, it will pick up changes on next generation
         # All thanks to the config manager being dynamic
+
+    def on_restart_requested(self):
+        asyncio.create_task(self._restart_application())
+
+    async def _restart_application(self):
+        Logger.info("Restarting application...")
+        try:
+            await asyncio.wait_for(self.stop_services(), timeout=10)
+        except asyncio.TimeoutError:
+            Logger.warning("Restart cleanup timed out; forcing restart.")
+        except Exception as e:
+            Logger.error(f"Error during restart cleanup: {e}")
+
+        try:
+            # Prefer replacing the current process to avoid orphaned/lingering windows.
+            if getattr(sys, "frozen", False):
+                argv = [sys.executable] + sys.argv[1:]
+            else:
+                script = Path(sys.argv[0]).expanduser()
+                try:
+                    script = script.resolve()
+                except Exception:
+                    script = script.absolute()
+                argv = [sys.executable, str(script)] + sys.argv[1:]
+
+            os.execv(argv[0], argv)
+        except Exception as e:
+            Logger.error(f"execv restart failed: {e}")
+
+        # Fallback: spawn a detached process and hard-exit this one.
+        try:
+            if getattr(sys, "frozen", False):
+                program = sys.executable
+                args = sys.argv[1:]
+            else:
+                program = sys.executable
+                args = [str(Path(sys.argv[0]).expanduser().resolve())] + sys.argv[1:]
+
+            QProcess.startDetached(program, args)
+        finally:
+            os._exit(0)
 
     @Slot()
     def on_start_clicked(self):
