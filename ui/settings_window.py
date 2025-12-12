@@ -80,6 +80,47 @@ class SettingsWindow(QMainWindow):
         self._sidebar_icon_cache[cache_key] = icon
         return icon
 
+    def _create_card_header(self, category_key: str, title: str) -> QWidget:
+        header = QWidget()
+        header.setStyleSheet("background-color: transparent;")
+
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        icon_file = self.SIDEBAR_ICON_MAP.get(category_key)
+        if icon_file:
+            icon_size = 20
+            icon_label = QLabel()
+            icon_label.setStyleSheet("background-color: transparent;")
+            icon_label.setFixedSize(icon_size, icon_size)
+            icon = self._get_sidebar_icon(icon_file, BrandColors.TEXT_PRIMARY, size=icon_size)
+            icon_label.setPixmap(icon.pixmap(icon_size, icon_size))
+            layout.addWidget(icon_label, 0, Qt.AlignVCenter)
+
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"""
+            font-size: {BrandColors.FONT_SIZE_TITLE};
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            color: {BrandColors.TEXT_PRIMARY};
+            background-color: transparent;
+        """)
+        layout.addWidget(title_label, 1, Qt.AlignVCenter)
+
+        return header
+
+    def _has_immediate_subdivider(self, fields) -> bool:
+        """
+        Returns True when the first meaningful field in a category is a subsection divider.
+        In that case, rendering a header underline tends to look like a duplicated divider.
+        """
+        for field in fields or []:
+            if field.type == SettingType.DESCRIPTION:
+                continue
+            return field.type == SettingType.DIVIDER
+        return False
+
     def _apply_category_item_icon(self, item: QListWidgetItem, active: bool):
         if not item:
             return
@@ -323,21 +364,18 @@ class SettingsWindow(QMainWindow):
             self.category_widgets[category.name] = card
             
             # Header
-            header = QLabel(category.name)
-            header.setStyleSheet(f"""
-                font-size: {BrandColors.FONT_SIZE_TITLE}; 
-                font-weight: bold; 
-                color: {BrandColors.TEXT_PRIMARY};
-                background-color: transparent;
-            """)
+            header = self._create_card_header(category.key, category.name)
             card_layout.addWidget(header)
             
-            # Divider
-            divider = QFrame()
-            divider.setFrameShape(QFrame.HLine)
-            divider.setFrameShadow(QFrame.Sunken)
-            divider.setStyleSheet(f"background-color: {BrandColors.ITEM_SELECTED}; margin-bottom: 5px;")
-            card_layout.addWidget(divider)
+            # Divider (skip when a subsection divider follows immediately)
+            if not self._has_immediate_subdivider(category.fields):
+                divider = QFrame()
+                divider.setFrameShape(QFrame.HLine)
+                divider.setFrameShadow(QFrame.Sunken)
+                divider.setFixedHeight(1)
+                divider.setStyleSheet(f"background-color: {BrandColors.INPUT_BORDER}; border: none;")
+                card_layout.addWidget(divider)
+                card_layout.addSpacing(6)
             
             # Fields
             for field in category.fields:
