@@ -3,7 +3,7 @@ Mini-console widget for displaying grouped logs in the main window.
 """
 import os
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame, QStackedLayout
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtSvgWidgets import QSvgWidget
@@ -180,6 +180,7 @@ class MiniConsole(QWidget):
         super().__init__(parent)
         self.groups = []  # List of LogGroup widgets
         self.last_level = None
+        self._main_logging_enabled = True
         
         self._init_ui()
     
@@ -250,21 +251,50 @@ class MiniConsole(QWidget):
                 background: none;
             }}
         """)
-        
-        # Content widget inside scroll area
+
+        # Stacked content: logs vs "disabled" message
+        self.stacked_widget = QWidget()
+        self.stacked_widget.setStyleSheet("background-color: transparent;")
+        self.stacked_layout = QStackedLayout(self.stacked_widget)
+
+        # Logs page (inside scroll area)
         self.content_widget = QWidget()
         self.content_widget.setStyleSheet("background-color: transparent;")
         self.content_layout = QVBoxLayout(self.content_widget)
         self.content_layout.setContentsMargins(8, 8, 8, 8)
         self.content_layout.setSpacing(6)
         self.content_layout.setAlignment(Qt.AlignTop)
-        
-        self.scroll_area.setWidget(self.content_widget)
+
+        # Disabled page (inside scroll area)
+        disabled_widget = QWidget()
+        disabled_widget.setStyleSheet("background-color: transparent;")
+        disabled_layout = QVBoxLayout(disabled_widget)
+        disabled_layout.setContentsMargins(12, 18, 12, 18)
+        disabled_layout.addStretch(1)
+
+        self.disabled_label = QLabel("Main Logging Disabled")
+        self.disabled_label.setAlignment(Qt.AlignCenter)
+        self.disabled_label.setStyleSheet(f"""
+            color: {BrandColors.TEXT_SECONDARY};
+            font-size: {BrandColors.FONT_SIZE_REGULAR};
+            background-color: transparent;
+        """)
+        disabled_layout.addWidget(self.disabled_label)
+        disabled_layout.addStretch(1)
+
+        self.stacked_layout.addWidget(self.content_widget)
+        self.stacked_layout.addWidget(disabled_widget)
+        self.stacked_layout.setCurrentWidget(self.content_widget)
+
+        self.scroll_area.setWidget(self.stacked_widget)
         container_layout.addWidget(self.scroll_area)
         main_layout.addWidget(container)
     
     def add_log(self, level: LogLevel, message: str):
         """Add a log message to the mini-console."""
+        if not self._main_logging_enabled:
+            return
+
         # Skip DEBUG logs
         if level == LogLevel.DEBUG:
             return
@@ -309,3 +339,16 @@ class MiniConsole(QWidget):
             group.deleteLater()
         self.groups.clear()
         self.last_level = None
+
+    def set_main_logging_enabled(self, enabled: bool):
+        """Enable/disable Activity Log updates and show a placeholder when disabled."""
+        enabled = bool(enabled)
+        if enabled == self._main_logging_enabled:
+            return
+
+        self._main_logging_enabled = enabled
+        if enabled:
+            self.stacked_layout.setCurrentWidget(self.content_widget)
+        else:
+            self.clear()
+            self.stacked_layout.setCurrentIndex(1)

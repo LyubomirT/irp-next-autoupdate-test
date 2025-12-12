@@ -129,6 +129,7 @@ class MainWindow(QMainWindow):
         self.server = None
         self.settings_window = None
         self.console_window = None
+        self._main_logging_enabled = True
         
         # Initialize logging based on settings
         self._setup_logging()
@@ -139,7 +140,15 @@ class MainWindow(QMainWindow):
     def _setup_logging(self):
         """Setup logging (console and file) based on settings."""
         # Console window (separate from mini-console)
-        enable_console = self.config_manager.get_setting("system_settings", "enable_console")
+        enable_console = self.config_manager.get_setting("console_settings", "enable_console")
+
+        # Routing options (only user-toggleable when console is enabled)
+        log_to_main = self.config_manager.get_effective_setting("console_settings", "log_to_main")
+        log_to_stdout = self.config_manager.get_effective_setting("console_settings", "log_to_stdout")
+
+        Logger.set_stdout_enabled(bool(log_to_stdout))
+        self._main_logging_enabled = bool(log_to_main)
+        self.mini_console.set_main_logging_enabled(self._main_logging_enabled)
         if enable_console:
             self._show_console()
         else:
@@ -179,8 +188,9 @@ class MainWindow(QMainWindow):
         if self.console_window:
             self.console_window.append_log(level.value, message)
         
-        # Also route to mini-console (always, except DEBUG which is filtered inside)
-        self.mini_console.add_log(level, message)
+        # Also route to mini-console when enabled (DEBUG is filtered inside)
+        if self._main_logging_enabled:
+            self.mini_console.add_log(level, message)
     
     def _update_status(self, text: str, status_type: str = "info"):
         """Update the status label with appropriate styling."""

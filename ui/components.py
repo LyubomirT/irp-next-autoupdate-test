@@ -236,6 +236,18 @@ class Tumbler(QCheckBox):
 
         self.setStyleSheet(self._get_stylesheet())
 
+    def set_dependency_mode(self, mode: str | None):
+        """
+        Set a visual dependency mode for the tumbler.
+        Supported modes: None, "forced", "ignored".
+        """
+        mode_value = mode or ""
+        if self.property("depMode") == mode_value:
+            return
+        self.setProperty("depMode", mode_value)
+        self.setStyleSheet(self._get_stylesheet())
+        self.update()
+
     def _get_stylesheet(self):
         # We use the indicator subcontrol
         return f"""
@@ -254,6 +266,21 @@ class Tumbler(QCheckBox):
             }}
             QCheckBox::indicator:unchecked:hover {{
                 background-color: {BrandColors.ITEM_HOVER}; 
+            }}
+            QCheckBox[depMode="forced"]::indicator {{
+                background-color: {BrandColors.WARNING};
+            }}
+            QCheckBox[depMode="forced"]::indicator:checked {{
+                background-color: {BrandColors.WARNING};
+            }}
+            QCheckBox[depMode="forced"]::indicator:unchecked:hover {{
+                background-color: {BrandColors.WARNING};
+            }}
+            QCheckBox[depMode="ignored"]::indicator {{
+                background-color: {BrandColors.TUMBLER_BG};
+            }}
+            QCheckBox[depMode="ignored"]::indicator:checked {{
+                background-color: {BrandColors.TUMBLER_BG};
             }}
             /* The tumbler look is achieved via custom painting in paintEvent
             */
@@ -283,7 +310,12 @@ class Tumbler(QCheckBox):
         
         # Draw track
         track_rect = QRect(0, 0, self._width, self._height)
-        if self.isChecked():
+        dep_mode = self.property("depMode") or ""
+        if dep_mode == "forced":
+            bg_color = QColor(BrandColors.WARNING)
+        elif dep_mode == "ignored":
+            bg_color = QColor(BrandColors.TUMBLER_BG)
+        elif self.isChecked():
             bg_color = QColor(BrandColors.ACCENT)
         else:
             bg_color = QColor(BrandColors.TUMBLER_BG)

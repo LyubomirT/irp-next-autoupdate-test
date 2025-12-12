@@ -21,6 +21,14 @@ class SettingsMigrator:
                     formatting["formatting_preset"] = "XML-Like - Name"
                 elif preset == "Divided":
                     formatting["formatting_preset"] = "Divided - Name"
+
+        # Migration: enable_console moved from system_settings -> console_settings
+        system_settings = settings.get("system_settings")
+        if isinstance(system_settings, dict) and "enable_console" in system_settings:
+            enable_console = system_settings.pop("enable_console")
+            console_settings = settings.setdefault("console_settings", {})
+            if isinstance(console_settings, dict) and "enable_console" not in console_settings:
+                console_settings["enable_console"] = enable_console
                     
         # Future migrations will be added here
         # e.g. v1 to v2

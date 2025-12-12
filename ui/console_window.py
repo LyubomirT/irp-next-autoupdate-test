@@ -2,11 +2,24 @@
 Console window for displaying application logs.
 QT-based window with black background and colored text.
 """
-from PySide6.QtWidgets import QMainWindow, QPlainTextEdit, QVBoxLayout, QWidget
+from datetime import datetime
+from pathlib import Path
+
+from PySide6.QtWidgets import (
+    QMainWindow,
+    QPlainTextEdit,
+    QVBoxLayout,
+    QHBoxLayout,
+    QWidget,
+    QPushButton,
+    QFileDialog,
+    QMessageBox,
+)
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QTextCharFormat, QColor, QFont
 
 from .brand import BrandColors
+from utils.logger import Logger
 
 
 class ConsoleWindow(QMainWindow):
@@ -72,6 +85,55 @@ class ConsoleWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Mini menu bar (Clear / Dump)
+        menu_bar = QWidget()
+        menu_bar.setStyleSheet("""
+            QWidget {
+                background-color: #101010;
+                border-bottom: 1px solid #1a1a1a;
+            }
+        """)
+        menu_layout = QHBoxLayout(menu_bar)
+        menu_layout.setContentsMargins(8, 8, 8, 8)
+        menu_layout.setSpacing(8)
+
+        button_style = f"""
+            QPushButton {{
+                background-color: #1a1a1a;
+                color: {BrandColors.TEXT_PRIMARY};
+                border: 1px solid #333333;
+                padding: 6px 12px;
+                border-radius: 6px;
+                font-size: {BrandColors.FONT_SIZE_REGULAR};
+                font-family: {BrandColors.FONT_FAMILY};
+            }}
+            QPushButton:hover {{
+                background-color: #222222;
+                border: 1px solid {BrandColors.ACCENT};
+            }}
+            QPushButton:pressed {{
+                background-color: {BrandColors.ACCENT};
+                border: 1px solid {BrandColors.ACCENT};
+            }}
+        """
+
+        menu_layout.addStretch(1)
+
+        clear_btn = QPushButton("Clear")
+        clear_btn.setCursor(Qt.PointingHandCursor)
+        clear_btn.setStyleSheet(button_style)
+        clear_btn.clicked.connect(self.clear)
+        menu_layout.addWidget(clear_btn)
+
+        dump_btn = QPushButton("Dump")
+        dump_btn.setCursor(Qt.PointingHandCursor)
+        dump_btn.setStyleSheet(button_style)
+        dump_btn.clicked.connect(self.dump)
+        menu_layout.addWidget(dump_btn)
+
+        layout.addWidget(menu_bar)
         
         # Text display area
         self.text_area = QPlainTextEdit()
@@ -142,6 +204,54 @@ class ConsoleWindow(QMainWindow):
                 background-color: #0c0c0c;
             }}
         """)
+
+    def _get_dump_directory(self) -> str:
+        if not self.config_manager:
+            return ""
+
+        value = self.config_manager.get_setting("console_dumping", "condump_directory")
+        return str(value).strip() if value is not None else ""
+
+    def dump(self):
+        """Dump current console contents to a file."""
+        text = self.text_area.toPlainText()
+        if not text.strip():
+            QMessageBox.information(self, "Console Dump", "Console is empty.")
+            return
+
+        dump_dir = self._get_dump_directory()
+        if not dump_dir:
+            selected_dir = QFileDialog.getExistingDirectory(self, "Select Dump Directory")
+            if not selected_dir:
+                return
+            dump_dir = selected_dir
+
+        try:
+            out_dir = Path(dump_dir).expanduser()
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            out_path = out_dir / f"condump_{timestamp}.txt"
+            counter = 1
+            while out_path.exists():
+                out_path = out_dir / f"condump_{timestamp}_{counter}.txt"
+                counter += 1
+
+            content = text if text.endswith("\n") else (text + "\n")
+            out_path.write_text(content, encoding="utf-8", errors="replace")
+            Logger.success(f"Console dumped to: {out_path}")
+        except Exception as exc:
+            Logger.error(f"Failed to dump console: {exc}")
+            QMessageBox.warning(self, "Console Dump", f"Failed to dump console:\n\n{exc}")
+
+    def _confirm_clear_enabled(self) -> bool:
+        if not self.config_manager:
+            return True
+
+        value = self.config_manager.get_setting("console_dumping", "confirm_clear")
+        if value is None:
+            return True
+        return bool(value)
 
     def apply_settings(self):
         """Apply settings from config manager."""
@@ -289,6 +399,16 @@ class ConsoleWindow(QMainWindow):
     
     def clear(self):
         """Clear all log content."""
+        if self._confirm_clear_enabled() and self.text_area.toPlainText().strip():
+            reply = QMessageBox.question(
+                self,
+                "Clear Console",
+                "Are you sure you want to clear the console output?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
         self.text_area.clear()
         self._line_count = 0
     

@@ -90,6 +90,48 @@ class ConfigManager:
     def get_setting(self, category_key: str, field_key: str) -> Any:
         return self.settings.get(category_key, {}).get(field_key)
 
+    def _iter_schema_fields(self, fields):
+        for field in fields:
+            yield field
+            if field.type == SettingType.ROW and field.sub_fields:
+                yield from self._iter_schema_fields(field.sub_fields)
+
+    def _get_schema_field(self, category_key: str, field_key: str):
+        for category in SCHEMA:
+            if category.key != category_key:
+                continue
+            for field in self._iter_schema_fields(category.fields):
+                if field.key == field_key:
+                    return field
+        return None
+
+    def get_effective_setting(self, category_key: str, field_key: str) -> Any:
+        """
+        Returns the effective value for a setting, applying schema-driven rules
+        such as forced values when dependencies are unmet.
+        """
+        value = self.get_setting(category_key, field_key)
+        field_def = self._get_schema_field(category_key, field_key)
+        if not field_def:
+            return value
+
+        depends = getattr(field_def, "depends", None)
+        if not depends:
+            return value
+
+        try:
+            dep_category, dep_field = depends.split(".", 1)
+        except ValueError:
+            return value
+
+        dep_value = self.get_setting(dep_category, dep_field)
+        is_met = bool(dep_value)
+        forced_value = getattr(field_def, "force_when_dep_unmet", None)
+        if (not is_met) and (forced_value is not None):
+            return forced_value
+
+        return value
+
     def set_setting(self, category_key: str, field_key: str, value: Any):
         if category_key not in self.settings:
             self.settings[category_key] = {}

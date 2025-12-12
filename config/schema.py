@@ -31,6 +31,7 @@ class SettingField:
     action: Optional[str] = None # For buttons (function name to call)
     sub_fields: Optional[List["SettingField"]] = None # For ROW type
     ratios: Optional[List[int]] = None # For ROW type (e.g. [70, 30])
+    force_when_dep_unmet: Optional[Any] = None
 
 @dataclass
 class SettingCategory:
@@ -308,13 +309,6 @@ SCHEMA = [
         key="system_settings",
         fields=[
             SettingField(
-                key="enable_console",
-                label="Enable Console",
-                type=SettingType.BOOLEAN,
-                default=False,
-                tooltip="Show a console window for viewing application logs."
-            ),
-            SettingField(
                 key="persistent_sessions",
                 label="Persistent Sessions",
                 type=SettingType.BOOLEAN,
@@ -363,6 +357,31 @@ SCHEMA = [
         key="console_settings",
         fields=[
             SettingField(
+                key="enable_console",
+                label="Enable Console",
+                type=SettingType.BOOLEAN,
+                default=False,
+                tooltip="Show a console window for viewing application logs.",
+            ),
+            SettingField(
+                key="log_to_main",
+                label="Log to Main",
+                type=SettingType.BOOLEAN,
+                default=True,
+                tooltip="Also log to the Activity Log in the main window. Forced on if the console is disabled.",
+                depends="console_settings.enable_console",
+                force_when_dep_unmet=True,
+            ),
+            SettingField(
+                key="log_to_stdout",
+                label="Log to Stdout",
+                type=SettingType.BOOLEAN,
+                default=True,
+                tooltip="Also log to stdout/terminal. Forced on if the console is disabled.",
+                depends="console_settings.enable_console",
+                force_when_dep_unmet=True,
+            ),
+            SettingField(
                 key="max_lines",
                 label="Max Line Limit",
                 type=SettingType.INTEGER,
@@ -390,6 +409,26 @@ SCHEMA = [
                 type=SettingType.BOOLEAN,
                 default=False,
                 tooltip="Keep the console window on top of other windows."
+            ),
+        ]
+    ),
+    SettingCategory(
+        name="Console Dumping",
+        key="console_dumping",
+        fields=[
+            SettingField(
+                key="confirm_clear",
+                label="Confirm Clear",
+                type=SettingType.BOOLEAN,
+                default=True,
+                tooltip="Ask for confirmation before clearing the console output.",
+            ),
+            SettingField(
+                key="condump_directory",
+                label="Condump Directory",
+                type=SettingType.STRING,
+                default="",
+                tooltip="Directory to write console dumps to. Leave blank to ask each time.",
             ),
         ]
     ),

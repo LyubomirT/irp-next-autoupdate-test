@@ -29,6 +29,7 @@ class SettingsWindow(QMainWindow):
         "logfiles": "file.svg",
         "system_settings": "monitor.svg",
         "console_settings": "terminal.svg",
+        "console_dumping": "download.svg",
         "network_settings": "share-2.svg",
     }
 
@@ -109,6 +110,8 @@ class SettingsWindow(QMainWindow):
 
             if field.key == "config_storage_custom_path":
                 widget.setPlaceholderText("Custom config directory…")
+            elif field.key == "condump_directory":
+                widget.setPlaceholderText("Ask (leave blank)…")
             widget.textChanged.connect(self._on_setting_changed)
         elif field.type == SettingType.DROPDOWN:
             widget = StyledComboBox()
@@ -464,12 +467,16 @@ class SettingsWindow(QMainWindow):
         
         # Setup dependency tracking
         self.dependencies = {} # Map "dependency_key" -> list of "dependent_key"
+        self.field_defs = {} # Map "category.key" -> SettingField
+        self._dep_override_cache = {} # Map "category.key" -> underlying value (when overriding display value)
         for category in SCHEMA:
             for field in self._iter_fields(category.fields):
+                full_key = f"{category.key}.{field.key}"
+                self.field_defs[full_key] = field
                 if field.depends:
                     if field.depends not in self.dependencies:
                         self.dependencies[field.depends] = []
-                    self.dependencies[field.depends].append(f"{category.key}.{field.key}")
+                    self.dependencies[field.depends].append(full_key)
         
         # Debounce timer for updates
         self.update_timer = QTimer()
@@ -528,6 +535,31 @@ class SettingsWindow(QMainWindow):
         self.unsaved_changes = True
         self.update_timer.start()
 
+    def _get_widget_value(self, widget):
+        if isinstance(widget, Tumbler):
+            return widget.isChecked()
+        if isinstance(widget, StyledLineEdit) or isinstance(widget, QLineEdit):
+            return widget.text()
+        if isinstance(widget, StyledComboBox):
+            return widget.currentText()
+        if isinstance(widget, StyledTextEdit):
+            return widget.toPlainText()
+        return None
+
+    def _set_widget_value(self, widget, value):
+        widget.blockSignals(True)
+        try:
+            if isinstance(widget, Tumbler):
+                widget.setChecked(bool(value))
+            elif isinstance(widget, StyledLineEdit) or isinstance(widget, QLineEdit):
+                widget.setText("" if value is None else str(value))
+            elif isinstance(widget, StyledComboBox):
+                widget.setCurrentText("" if value is None else str(value))
+            elif isinstance(widget, StyledTextEdit):
+                widget.setPlainText("" if value is None else str(value))
+        finally:
+            widget.blockSignals(False)
+
     def _update_dependencies(self):
         for dep_key, dependent_keys in self.dependencies.items():
             dep_widget = self.field_widgets.get(dep_key)
@@ -547,6 +579,39 @@ class SettingsWindow(QMainWindow):
             for dependent_key in dependent_keys:
                 widget = self.field_widgets.get(dependent_key)
                 if widget:
+                    field_def = self.field_defs.get(dependent_key)
+                    forced_value = getattr(field_def, "force_when_dep_unmet", None) if field_def else None
+
+                    desired_mode = None
+                    should_override = False
+                    override_value = None
+
+                    if not is_met:
+                        if forced_value is not None:
+                            should_override = True
+                            override_value = forced_value
+                            if isinstance(widget, Tumbler):
+                                desired_mode = "forced"
+                        elif isinstance(widget, Tumbler):
+                            # Disabled + not counted: show as OFF and treat as unmet.
+                            should_override = True
+                            override_value = False
+                            desired_mode = "ignored"
+
+                    if is_met:
+                        if dependent_key in self._dep_override_cache:
+                            cached_value = self._dep_override_cache.pop(dependent_key)
+                            self._set_widget_value(widget, cached_value)
+                        if isinstance(widget, Tumbler):
+                            widget.set_dependency_mode(None)
+                    else:
+                        if should_override:
+                            if dependent_key not in self._dep_override_cache:
+                                self._dep_override_cache[dependent_key] = self._get_widget_value(widget)
+                            self._set_widget_value(widget, override_value)
+                        if isinstance(widget, Tumbler):
+                            widget.set_dependency_mode(desired_mode)
+
                     # If there's a SettingRow for this field, enable/disable the whole row
                     row = self.setting_rows.get(dependent_key)
                     if row:
@@ -904,6 +969,9 @@ class SettingsWindow(QMainWindow):
                                 is_enabled = bool(dep_widget.text())
                             elif isinstance(dep_widget, StyledComboBox):
                                 is_enabled = bool(dep_widget.currentText())
+
+                    if (not is_enabled) and (key in self._dep_override_cache):
+                        value = self._dep_override_cache[key]
                         
                     if is_enabled:
                         # Check required

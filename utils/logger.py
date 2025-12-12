@@ -47,6 +47,7 @@ class Logger:
     
     _console_callback: Optional[Callable[[LogLevel, str], None]] = None
     _show_timestamps: bool = True
+    _stdout_enabled: bool = True
     
     _log_file: Optional[str] = None
     _max_file_size: int = 0
@@ -57,6 +58,11 @@ class Logger:
     def set_console_callback(cls, callback: Optional[Callable[[LogLevel, str], None]]):
         """Set the callback for sending logs to console window."""
         cls._console_callback = callback
+
+    @classmethod
+    def set_stdout_enabled(cls, enabled: bool):
+        """Enable/disable stdout logging."""
+        cls._stdout_enabled = bool(enabled)
         
     @classmethod
     def configure_file_logging(cls, enabled: bool, log_dir: str, max_files: int, max_size_val: int, size_unit: str):
@@ -192,9 +198,10 @@ class Logger:
     @classmethod
     def _log(cls, level: LogLevel, message: str):
         """Internal logging method."""
-        # Always print to stdout with ANSI colors
-        formatted_stdout = cls._format_message(level, message, include_ansi=True)
-        print(formatted_stdout)
+        # Print to stdout with ANSI colors (if enabled)
+        if cls._stdout_enabled:
+            formatted_stdout = cls._format_message(level, message, include_ansi=True)
+            print(formatted_stdout)
         
         # If console callback is set, send there too (without ANSI)
         if cls._console_callback or cls._log_file:
