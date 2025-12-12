@@ -1,10 +1,11 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QListWidget, 
-    QScrollArea, QLabel, QPushButton, QFrame, QMessageBox, QDialog,
+    QScrollArea, QLabel, QPushButton, QFrame, QMessageBox, QDialog, QListWidgetItem,
     QLineEdit, QTextEdit, QComboBox, QGraphicsColorizeEffect
 )
-from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QIcon, QColor
+from PySide6.QtCore import Qt, Signal, QTimer, QSize, QByteArray, QRectF
+from PySide6.QtGui import QIcon, QColor, QPixmap, QPainter
+from PySide6.QtSvg import QSvgRenderer
 from difflib import SequenceMatcher
 import os
 import shutil
@@ -21,6 +22,16 @@ class SettingsWindow(QMainWindow):
     settings_saved = Signal()
     restart_requested = Signal()
 
+    SIDEBAR_ICON_MAP = {
+        "providers_credentials": "key.svg",
+        "formatting": "type.svg",
+        "deepseek_behavior": "pen-tool.svg",
+        "logfiles": "file.svg",
+        "system_settings": "monitor.svg",
+        "console_settings": "terminal.svg",
+        "network_settings": "share-2.svg",
+    }
+
     def __init__(self, config_manager: ConfigManager, parent=None):
         super().__init__(parent)
         self.config_manager = config_manager
@@ -31,9 +42,57 @@ class SettingsWindow(QMainWindow):
         self.unsaved_changes = False
         self.field_widgets = {} # Map "category.key" -> widget
         self.setting_rows = {} # Map "category.key" -> SettingRow (for dependency toggling)
+        self._sidebar_icon_cache = {}
 
         self._init_ui()
         self._load_values()
+
+    def _get_sidebar_icon(self, icon_file: str, color: str, size: int = 18) -> QIcon:
+        cache_key = (icon_file, color, size, round(self.devicePixelRatioF(), 2))
+        cached = self._sidebar_icon_cache.get(cache_key)
+        if cached:
+            return cached
+
+        icon_path = os.path.join(os.path.dirname(__file__), "assets", "icons", "sidebar", icon_file)
+        try:
+            with open(icon_path, "r", encoding="utf-8") as file:
+                svg = file.read()
+        except OSError as exc:
+            Logger.warning(f"Failed to read icon {icon_path}: {exc}")
+            return QIcon()
+
+        svg = svg.replace("currentColor", color)
+        renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
+
+        dpr = self.devicePixelRatioF()
+        px = int(size * dpr)
+
+        pixmap = QPixmap(px, px)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        renderer.render(painter, QRectF(0, 0, px, px))
+        painter.end()
+
+        pixmap.setDevicePixelRatio(dpr)
+        icon = QIcon(pixmap)
+        self._sidebar_icon_cache[cache_key] = icon
+        return icon
+
+    def _apply_category_item_icon(self, item: QListWidgetItem, active: bool):
+        if not item:
+            return
+
+        icon_file = item.data(Qt.UserRole + 1)
+        if not icon_file:
+            return
+
+        color = BrandColors.TEXT_PRIMARY if active else BrandColors.TEXT_SECONDARY
+        item.setIcon(self._get_sidebar_icon(icon_file, color))
+
+    def _on_category_selection_changed(self, current: QListWidgetItem, previous: QListWidgetItem):
+        self._apply_category_item_icon(previous, active=False)
+        self._apply_category_item_icon(current, active=True)
 
     def _create_field_widget(self, field, category_key):
         widget = None
@@ -107,29 +166,34 @@ class SettingsWindow(QMainWindow):
 
         self.category_list = QListWidget()
         self.category_list.setFixedWidth(250)
+        self.category_list.setSpacing(4)
+        self.category_list.setIconSize(QSize(18, 18))
         self.category_list.setStyleSheet(f"""
             QListWidget {{
                 background-color: {BrandColors.SIDEBAR_BG};
                 border: none;
                 outline: none;
-                font-size: {BrandColors.FONT_SIZE_LARGE}; /* Applied to widget directly */
+                padding: 8px;
+                font-size: {BrandColors.FONT_SIZE_REGULAR}; /* Applied to widget directly */
+                font-family: {BrandColors.FONT_FAMILY};
             }}
             QListWidget::item {{
-                padding: 20px;
+                padding: 10px 12px;
                 color: {BrandColors.TEXT_SECONDARY};
-                background-color: {BrandColors.CATEGORY_DEFAULT_BG};
-                border-left: 4px solid {BrandColors.CATEGORY_BORDER_DEFAULT};
-                margin-bottom: 2px; /* Small gap between items */
+                background-color: transparent;
+                border: 1px solid transparent;
+                border-radius: 8px;
             }}
             QListWidget::item:selected {{
                 background-color: {BrandColors.CATEGORY_ACTIVE_BG};
                 color: {BrandColors.TEXT_PRIMARY};
-                border-left: 4px solid {BrandColors.CATEGORY_ACTIVE_BORDER};
+                border: 1px solid {BrandColors.CATEGORY_ACTIVE_BORDER};
+                font-weight: 600;
             }}
             QListWidget::item:selected:hover {{
                 background-color: {BrandColors.CATEGORY_ACTIVE_BG};
                 color: {BrandColors.TEXT_PRIMARY};
-                border-left: 4px solid {BrandColors.CATEGORY_ACTIVE_BORDER};
+                border: 1px solid {BrandColors.CATEGORY_ACTIVE_BORDER};
             }}
             QListWidget::item:hover {{
                 background-color: {BrandColors.ITEM_HOVER};
@@ -137,6 +201,7 @@ class SettingsWindow(QMainWindow):
             }}
         """)
         self.category_list.itemClicked.connect(self._on_category_clicked)
+        self.category_list.currentItemChanged.connect(self._on_category_selection_changed)
         left_layout.addWidget(self.category_list, 1)
 
         # Search bar at bottom of sidebar
@@ -233,7 +298,12 @@ class SettingsWindow(QMainWindow):
         # Generate Fields
         for category in SCHEMA:
             # Add to list
-            self.category_list.addItem(category.name)
+            item = QListWidgetItem(category.name)
+            icon_file = self.SIDEBAR_ICON_MAP.get(category.key)
+            if icon_file:
+                item.setData(Qt.UserRole + 1, icon_file)
+                item.setIcon(self._get_sidebar_icon(icon_file, BrandColors.TEXT_SECONDARY))
+            self.category_list.addItem(item)
             
             # Category Card
             card = QWidget()
@@ -390,6 +460,7 @@ class SettingsWindow(QMainWindow):
 
         # Select first category by default
         self.category_list.setCurrentRow(0)
+        self._apply_category_item_icon(self.category_list.currentItem(), active=True)
         
         # Setup dependency tracking
         self.dependencies = {} # Map "dependency_key" -> list of "dependent_key"
@@ -613,9 +684,7 @@ class SettingsWindow(QMainWindow):
             if count > 0:
                 last_item = self.category_list.item(count - 1)
                 if last_item != self.category_list.currentItem():
-                    self.category_list.blockSignals(True)
                     self.category_list.setCurrentItem(last_item)
-                    self.category_list.blockSignals(False)
             return
 
         # Find which category is currently visible
@@ -647,9 +716,7 @@ class SettingsWindow(QMainWindow):
             if items:
                 item = items[0]
                 if item != self.category_list.currentItem():
-                    self.category_list.blockSignals(True)
                     self.category_list.setCurrentItem(item)
-                    self.category_list.blockSignals(False)
 
     def _sync_config_storage_from_active_dir(self):
         preset_widget = self.field_widgets.get("system_settings.config_storage_location")
