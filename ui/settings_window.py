@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt, Signal, QTimer, QSize, QByteArray, QRectF
 from PySide6.QtGui import QIcon, QColor, QPixmap, QPainter
 from PySide6.QtSvg import QSvgRenderer
 from difflib import SequenceMatcher
+import threading
 import os
 import shutil
 from pathlib import Path
@@ -17,16 +18,19 @@ from .brand import BrandColors
 from .components import Tumbler, StyledLineEdit, StyledTextEdit, StyledComboBox, Divider, Description, StyledButton, MultiColumnRow, SettingRow, ToggleRow, InputPairsWidget
 from .icons import IconUtils, IconType
 from utils.logger import Logger
+from utils.update_checker import check_for_updates, read_local_version
 
 class SettingsWindow(QMainWindow):
     settings_saved = Signal()
     restart_requested = Signal()
+    update_check_finished = Signal(object, str)
 
     SIDEBAR_ICON_MAP = {
         "providers_credentials": "key.svg",
         "formatting": "type.svg",
         "deepseek_behavior": "pen-tool.svg",
         "logfiles": "file.svg",
+        "application_settings": "settings.svg",
         "system_settings": "monitor.svg",
         "console_settings": "terminal.svg",
         "console_dumping": "download.svg",
@@ -47,6 +51,9 @@ class SettingsWindow(QMainWindow):
 
         self._init_ui()
         self._load_values()
+        self.update_check_finished.connect(self._handle_update_check_result)
+        self._update_check_in_progress = False
+        self._sync_application_settings_info()
 
     def _get_sidebar_icon(self, icon_file: str, color: str, size: int = 18) -> QIcon:
         cache_key = (icon_file, color, size, round(self.devicePixelRatioF(), 2))
@@ -181,6 +188,8 @@ class SettingsWindow(QMainWindow):
                 widget.clicked.connect(self._reset_formatting)
             elif field.action == "clear_persistent_profile":
                 widget.clicked.connect(self._clear_persistent_profile)
+            elif field.action == "check_for_updates":
+                widget.clicked.connect(self._check_for_updates)
         
         if widget:
             self.field_widgets[f"{category_key}.{field.key}"] = widget
@@ -388,6 +397,7 @@ class SettingsWindow(QMainWindow):
                 # Handle Description Type separately
                 if field.type == SettingType.DESCRIPTION:
                     widget = Description(field.default)
+                    self.field_widgets[f"{category.key}.{field.key}"] = widget
                     card_layout.addWidget(widget)
                     continue
 
@@ -889,6 +899,77 @@ class SettingsWindow(QMainWindow):
                 template_widget.setPlainText("### {{name}}\n{{content}}")
             elif text == "Divided - Role":
                 template_widget.setPlainText("### {{role}}\n{{content}}")
+
+    def _sync_application_settings_info(self):
+        version_widget = self.field_widgets.get("application_settings.current_version_info")
+        if isinstance(version_widget, QLabel):
+            version_widget.setText(f"Current version: {read_local_version()}")
+
+    def _set_update_status(self, text: str):
+        status_widget = self.field_widgets.get("application_settings.update_status_info")
+        if isinstance(status_widget, QLabel):
+            status_widget.setText(text)
+
+    def _check_for_updates(self):
+        if getattr(self, "_update_check_in_progress", False):
+            return
+
+        self._update_check_in_progress = True
+        self._set_update_status("Status: Checking...")
+
+        btn_key = "application_settings.check_for_updates_btn"
+        btn = self.field_widgets.get(btn_key)
+        original_text = btn.text() if isinstance(btn, QPushButton) else "Check"
+
+        if isinstance(btn, QPushButton):
+            btn.setEnabled(False)
+            btn.setText("Checking...")
+
+        def worker():
+            result = check_for_updates()
+            self.update_check_finished.emit(result, original_text)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _handle_update_check_result(self, result, original_button_text: str):
+        self._update_check_in_progress = False
+
+        btn = self.field_widgets.get("application_settings.check_for_updates_btn")
+        if isinstance(btn, QPushButton):
+            btn.setEnabled(True)
+            btn.setText(original_button_text or "Check")
+
+        self._sync_application_settings_info()
+
+        if result.error:
+            self._set_update_status("Status: Failed to check for updates.")
+            QMessageBox.warning(
+                self,
+                "Check For Updates",
+                "Failed to check for updates.\n\n"
+                f"{result.error}",
+            )
+            return
+
+        if result.update_available:
+            self._set_update_status(f"Status: Update available ({result.remote_version}).")
+            QMessageBox.information(
+                self,
+                "Update Available",
+                "A newer version is available.\n\n"
+                f"Current: {result.local_version}\n"
+                f"Latest: {result.remote_version}",
+            )
+            return
+
+        self._set_update_status(f"Status: Up to date ({result.local_version}).")
+        QMessageBox.information(
+            self,
+            "No Updates Found",
+            "You're up to date.\n\n"
+            f"Current: {result.local_version}\n"
+            f"Latest: {result.remote_version}",
+        )
 
     def _reset_formatting(self):
         preset_widget = self.field_widgets.get("formatting.formatting_preset")

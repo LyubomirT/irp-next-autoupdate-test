@@ -1,0 +1,151 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+import re
+from typing import Optional, Tuple
+
+import requests
+
+DEFAULT_REMOTE_VERSION_URL = (
+    "https://raw.githubusercontent.com/LyubomirT/intense-rp-next/refs/heads/v2-rewrite/version.txt"
+)
+
+_SEMVER_RE = re.compile(
+    r"^\s*v?"
+    r"(?P<major>0|[1-9]\d*)"
+    r"(?:\.(?P<minor>0|[1-9]\d*))?"
+    r"(?:\.(?P<patch>0|[1-9]\d*))?"
+    r"(?:-(?P<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+    r"(?:\+(?P<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+    r"\s*$"
+)
+
+
+@dataclass(frozen=True)
+class UpdateCheckResult:
+    local_version: str
+    remote_version: Optional[str]
+    update_available: bool
+    error: Optional[str] = None
+
+
+def _parse_semver(version: str) -> Tuple[Tuple[int, int, int], Optional[Tuple[str, ...]]]:
+    match = _SEMVER_RE.match(version or "")
+    if not match:
+        raise ValueError(f"Unsupported version format: {version!r}")
+
+    major = int(match.group("major"))
+    minor = int(match.group("minor") or 0)
+    patch = int(match.group("patch") or 0)
+
+    prerelease = match.group("prerelease")
+    prerelease_parts = tuple(prerelease.split(".")) if prerelease else None
+    return (major, minor, patch), prerelease_parts
+
+
+def compare_versions(a: str, b: str) -> int:
+    """
+    Compare two SemVer-like version strings.
+
+    Returns:
+        -1 if a < b
+         0 if a == b
+         1 if a > b
+    """
+    a_core, a_pre = _parse_semver(a)
+    b_core, b_pre = _parse_semver(b)
+
+    if a_core != b_core:
+        return -1 if a_core < b_core else 1
+
+    if a_pre is None and b_pre is None:
+        return 0
+    if a_pre is None:
+        return 1
+    if b_pre is None:
+        return -1
+
+    for a_id, b_id in zip(a_pre, b_pre):
+        a_is_num = a_id.isdigit()
+        b_is_num = b_id.isdigit()
+
+        if a_is_num and b_is_num:
+            a_num = int(a_id)
+            b_num = int(b_id)
+            if a_num != b_num:
+                return -1 if a_num < b_num else 1
+            continue
+
+        if a_is_num != b_is_num:
+            # Numeric identifiers have lower precedence than non-numeric identifiers.
+            return -1 if a_is_num else 1
+
+        if a_id != b_id:
+            return -1 if a_id < b_id else 1
+
+    if len(a_pre) == len(b_pre):
+        return 0
+    return -1 if len(a_pre) < len(b_pre) else 1
+
+
+def get_version_file_path(base_dir: Optional[Path] = None) -> Path:
+    if base_dir is None:
+        base_dir = Path(__file__).resolve().parent.parent
+    return (base_dir / "version.txt").resolve()
+
+
+def read_local_version(version_file: Optional[Path] = None) -> str:
+    if version_file is None:
+        version_file = get_version_file_path()
+    try:
+        return version_file.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return "unknown"
+    except OSError:
+        return "unknown"
+
+
+def fetch_remote_version(url: str = DEFAULT_REMOTE_VERSION_URL, timeout_s: float = 5.0) -> str:
+    response = requests.get(
+        url,
+        timeout=timeout_s,
+        headers={"User-Agent": "IntenseRP-Next-UpdateChecker"},
+    )
+    response.raise_for_status()
+    return response.text.strip()
+
+
+def check_for_updates(
+    remote_url: str = DEFAULT_REMOTE_VERSION_URL,
+    timeout_s: float = 5.0,
+    version_file: Optional[Path] = None,
+) -> UpdateCheckResult:
+    local_version = read_local_version(version_file)
+    try:
+        remote_version = fetch_remote_version(remote_url, timeout_s=timeout_s)
+    except Exception as exc:
+        return UpdateCheckResult(
+            local_version=local_version,
+            remote_version=None,
+            update_available=False,
+            error=str(exc),
+        )
+
+    try:
+        update_available = compare_versions(remote_version, local_version) > 0
+    except Exception as exc:
+        return UpdateCheckResult(
+            local_version=local_version,
+            remote_version=remote_version,
+            update_available=False,
+            error=str(exc),
+        )
+
+    return UpdateCheckResult(
+        local_version=local_version,
+        remote_version=remote_version,
+        update_available=update_available,
+        error=None,
+    )
+

@@ -2,6 +2,7 @@ import sys
 import asyncio
 import uvicorn
 import os
+import threading
 from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, 
@@ -19,6 +20,7 @@ from ui.mini_console import MiniConsole
 from ui.brand import BrandColors
 from ui.icons import IconUtils, IconType
 from utils.logger import Logger, LogLevel
+from utils.update_checker import check_for_updates
 
 
 def get_version():
@@ -136,6 +138,37 @@ class MainWindow(QMainWindow):
         
         # Always set the log callback for the mini-console
         Logger.set_console_callback(self._on_log_message)
+
+        self._maybe_check_for_updates_on_startup()
+
+    def _maybe_check_for_updates_on_startup(self):
+        try:
+            enabled = bool(
+                self.config_manager.get_setting(
+                    "application_settings", "check_for_updates_on_startup"
+                )
+            )
+        except Exception:
+            enabled = False
+
+        if not enabled:
+            return
+
+        def worker():
+            result = check_for_updates()
+            if result.error:
+                Logger.warning(f"Update check failed: {result.error}")
+                return
+
+            if result.update_available:
+                Logger.warning(
+                    f"Update available: {result.local_version} -> {result.remote_version}"
+                )
+                return
+
+            Logger.info(f"Up to date (v{result.local_version}).")
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _setup_logging(self):
         """Setup logging (console and file) based on settings."""

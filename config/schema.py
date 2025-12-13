@@ -353,6 +353,41 @@ SCHEMA = [
         ]
     ),
     SettingCategory(
+        name="Application Settings",
+        key="application_settings",
+        fields=[
+            SettingField(
+                key="current_version_info",
+                label="Current Version",
+                type=SettingType.DESCRIPTION,
+                default="Current version: (loading...)",
+                tooltip=None,
+            ),
+            SettingField(
+                key="update_status_info",
+                label="Update Status",
+                type=SettingType.DESCRIPTION,
+                default="Status: Not checked yet.",
+                tooltip=None,
+            ),
+            SettingField(
+                key="check_for_updates_btn",
+                label="Check For Updates",
+                type=SettingType.BUTTON,
+                default="Check",
+                action="check_for_updates",
+                tooltip="Compare local version.txt with the latest version on GitHub.",
+            ),
+            SettingField(
+                key="check_for_updates_on_startup",
+                label="Check for Updates on Startup",
+                type=SettingType.BOOLEAN,
+                default=False,
+                tooltip="Automatically check for updates when the app starts.",
+            ),
+        ],
+    ),
+    SettingCategory(
         name="Console Settings",
         key="console_settings",
         fields=[
