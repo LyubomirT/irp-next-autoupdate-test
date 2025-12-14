@@ -17,6 +17,7 @@ from config.schema import SCHEMA, SettingType
 from .brand import BrandColors
 from .components import Tumbler, StyledLineEdit, StyledTextEdit, StyledComboBox, Divider, Description, StyledButton, MultiColumnRow, SettingRow, ToggleRow, InputPairsWidget
 from .icons import IconUtils, IconType
+from .update_available_dialog import UpdateAvailableDialog, UpdateAvailableInfo
 from utils.logger import Logger
 from utils.update_checker import check_for_updates, read_local_version
 
@@ -953,13 +954,14 @@ class SettingsWindow(QMainWindow):
 
         if result.update_available:
             self._set_update_status(f"Status: Update available ({result.remote_version}).")
-            QMessageBox.information(
-                self,
-                "Update Available",
-                "A newer version is available.\n\n"
-                f"Current: {result.local_version}\n"
-                f"Latest: {result.remote_version}",
+            dialog = UpdateAvailableDialog(
+                UpdateAvailableInfo(
+                    local_version=str(result.local_version or "unknown"),
+                    remote_version=str(result.remote_version or "unknown"),
+                ),
+                parent=self,
             )
+            dialog.exec()
             return
 
         self._set_update_status(f"Status: Up to date ({result.local_version}).")

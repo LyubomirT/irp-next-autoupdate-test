@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, 
     QHBoxLayout, QSizePolicy
 )
-from PySide6.QtCore import Slot, Qt, QProcess
+from PySide6.QtCore import Signal, Slot, Qt, QProcess
 import qasync
 
 from deepseek_driver import DeepSeekDriver
@@ -19,6 +19,7 @@ from ui.console_window import ConsoleWindow
 from ui.mini_console import MiniConsole
 from ui.brand import BrandColors
 from ui.icons import IconUtils, IconType
+from ui.update_available_dialog import UpdateAvailableDialog, UpdateAvailableInfo
 from utils.logger import Logger, LogLevel
 from utils.update_checker import check_for_updates
 
@@ -34,6 +35,8 @@ def get_version():
 
 
 class MainWindow(QMainWindow):
+    update_available_found = Signal(str, str)
+
     def __init__(self):
         super().__init__()
         version = get_version()
@@ -138,8 +141,24 @@ class MainWindow(QMainWindow):
         
         # Always set the log callback for the mini-console
         Logger.set_console_callback(self._on_log_message)
+        self.update_available_found.connect(self._show_update_available_dialog)
 
         self._maybe_check_for_updates_on_startup()
+
+    @Slot(str, str)
+    def _show_update_available_dialog(self, local_version: str, remote_version: str):
+        if getattr(self, "_update_dialog_open", False):
+            return
+
+        self._update_dialog_open = True
+        try:
+            dialog = UpdateAvailableDialog(
+                UpdateAvailableInfo(local_version=local_version, remote_version=remote_version),
+                parent=self,
+            )
+            dialog.exec()
+        finally:
+            self._update_dialog_open = False
 
     def _maybe_check_for_updates_on_startup(self):
         try:
@@ -164,6 +183,8 @@ class MainWindow(QMainWindow):
                 Logger.warning(
                     f"Update available: {result.local_version} -> {result.remote_version}"
                 )
+                if result.remote_version is not None:
+                    self.update_available_found.emit(result.local_version, result.remote_version)
                 return
 
             Logger.info(f"Up to date (v{result.local_version}).")
