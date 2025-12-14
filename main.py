@@ -490,6 +490,12 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+
+    from ui.app_icon import get_app_icon
+
+    app_icon = get_app_icon()
+    if not app_icon.isNull():
+        app.setWindowIcon(app_icon)
     
     # Load Fonts
     from PySide6.QtGui import QFontDatabase, QFont
