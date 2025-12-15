@@ -4,6 +4,9 @@
 >[!IMPORTANT]
 > This is not the original IntenseRP Next project. Here I'm rebuilding it from scratch with new technologies and approaches. Right now it's in a state of messy, inefficient reverse-engineering and prototyping, but eventually it will eat its predecessor and restore "the glory" of IntenseRP Next.
 
+>[!DANGER]
+> The auto-updater is currently VERY, VERY broken and may corrupt your installation. Just don't use it for now, I'll figure it out later.
+
 # What's known
 
 - v2 will use Python and FastAPI for the backend.
