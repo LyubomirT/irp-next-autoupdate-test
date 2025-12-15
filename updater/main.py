@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -205,6 +206,11 @@ def _perform_update(args: UpdateArgs, *, status_cb, progress_cb) -> None:
     install_dir = args.install_dir.resolve()
     updater_path = _resolve_updater_exe_path()
     payload_dir = (args.payload_dir or _default_payload_dir(updater_path)).resolve()
+
+    try:
+        os.chdir(tempfile.gettempdir())
+    except Exception:
+        pass
 
     status_cb("Waiting for the app to close…")
     progress_cb(5)

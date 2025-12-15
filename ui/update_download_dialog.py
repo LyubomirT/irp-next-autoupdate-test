@@ -388,7 +388,7 @@ class UpdateDownloadDialog(QDialog):
             str(prepared.extracted_app_root),
         ]
 
-        detached_result = QProcess.startDetached(str(updater_exe), args)
+        detached_result = QProcess.startDetached(str(updater_exe), args, tempfile.gettempdir())
         ok = detached_result[0] if isinstance(detached_result, tuple) else bool(detached_result)
         if not ok:
             QMessageBox.warning(
