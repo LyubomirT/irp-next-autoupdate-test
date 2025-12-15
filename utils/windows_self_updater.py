@@ -52,6 +52,7 @@ $StagedDir  = "{_ps_escape(str(staged_root))}"
 $ExeName    = "{_ps_escape(exe_name)}"
 $AppPid     = {int(app_pid)}
 $Preserve   = {preserve_ps}
+$BackupDir  = $null
 
 function Write-UpdateLog([string]$Message) {{
   $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -62,11 +63,11 @@ function Write-UpdateLog([string]$Message) {{
   }}
 }}
 
-function Wait-ForProcessExit([int]$Pid, [int]$TimeoutSec = 120) {{
-  if ($Pid -le 0) {{ return }}
+function Wait-ForProcessExit([int]$ProcessId, [int]$TimeoutSec = 120) {{
+  if ($ProcessId -le 0) {{ return }}
   $deadline = (Get-Date).AddSeconds($TimeoutSec)
   while ((Get-Date) -lt $deadline) {{
-    $p = Get-Process -Id $Pid -ErrorAction SilentlyContinue
+    $p = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
     if (-not $p) {{ return }}
     Start-Sleep -Milliseconds 250
   }}
@@ -83,7 +84,7 @@ function Merge-Dir([string]$From, [string]$To) {{
 
 try {{
   Write-UpdateLog "Starting update. StagedDir=$StagedDir"
-  Wait-ForProcessExit -Pid $AppPid
+  Wait-ForProcessExit -ProcessId $AppPid
 
   if (-not (Test-Path -LiteralPath $InstallDir)) {{
     throw "Install directory not found: $InstallDir"
@@ -131,7 +132,7 @@ catch {{
 
   try {{
     # Roll back: restore backup if present.
-    if (Test-Path -LiteralPath $BackupDir) {{
+    if ($BackupDir -and (Test-Path -LiteralPath $BackupDir)) {{
       if (Test-Path -LiteralPath $InstallDir) {{
         Remove-Item -Recurse -Force -LiteralPath $InstallDir
       }}
@@ -144,7 +145,9 @@ catch {{
   }}
 
   try {{
-    Add-Content -Path (Join-Path $InstallDir "update_failed.txt") -Value $err
+    if (Test-Path -LiteralPath $InstallDir) {{
+      Add-Content -Path (Join-Path $InstallDir "update_failed.txt") -Value $err
+    }}
   }} catch {{
     # best-effort
   }}
