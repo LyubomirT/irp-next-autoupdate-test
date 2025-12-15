@@ -9,3 +9,5 @@ config_data/
 cache/
 logs/
 config_dir.txt
+comp.png
+raw.png

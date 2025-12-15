@@ -24,11 +24,36 @@ from utils.logger import Logger, LogLevel
 from utils.update_checker import check_for_updates
 
 
+def _resolve_resource_path(*parts: str) -> Path:
+    """
+    Resolve a resource path in both dev and PyInstaller-frozen runs.
+
+    We try, in order:
+    - PyInstaller extraction/bundle dir (sys._MEIPASS)
+    - Executable directory (where users often place loose data)
+    - Source checkout directory (relative to this file)
+    """
+    candidates: list[Path] = []
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass) / Path(*parts))
+        candidates.append(Path(sys.executable).resolve().parent / Path(*parts))
+
+    candidates.append(Path(__file__).resolve().parent / Path(*parts))
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    return candidates[-1]
+
+
 def get_version():
     """Read version from version.txt file."""
-    version_file = os.path.join(os.path.dirname(__file__), "version.txt")
+    version_file = _resolve_resource_path("version.txt")
     try:
-        with open(version_file, 'r', encoding='utf-8') as f:
+        with open(version_file, "r", encoding="utf-8") as f:
             return f.read().strip()
     except FileNotFoundError:
         return "unknown"
@@ -492,6 +517,16 @@ def main():
     app = QApplication(sys.argv)
 
     from ui.app_icon import get_app_icon
+    from PySide6.QtWidgets import QStyleFactory
+
+    # Force a consistent style between running-from-source and packaged(PyInstaller) builds. 
+    # Style availability can differ when plugins aren't bundled the same way.
+    available_styles = {name.lower(): name for name in QStyleFactory.keys()}
+    for preferred in ("fusion", "windowsvista", "windows"):
+        style_name = available_styles.get(preferred.lower())
+        if style_name:
+            app.setStyle(style_name)
+            break
 
     app_icon = get_app_icon()
     if not app_icon.isNull():
@@ -501,11 +536,11 @@ def main():
     from PySide6.QtGui import QFontDatabase, QFont
     import os
     
-    font_dir = os.path.join(os.path.dirname(__file__), "ui", "fonts")
-    if os.path.exists(font_dir):
+    font_dir = _resolve_resource_path("ui", "fonts")
+    if font_dir.exists():
         for filename in os.listdir(font_dir):
             if filename.endswith(".ttf"):
-                QFontDatabase.addApplicationFont(os.path.join(font_dir, filename))
+                QFontDatabase.addApplicationFont(str(font_dir / filename))
     
     # Set Global Font
     font = QFont(BrandColors.FONT_FAMILY)
