@@ -4,7 +4,7 @@ Outputs to stdout and optionally duplicates to console window.
 """
 from enum import Enum
 from datetime import datetime
-from typing import Optional, Callable
+from typing import Optional, Callable, Any
 import os
 import glob
 
@@ -46,6 +46,7 @@ class Logger:
     """
     
     _console_callback: Optional[Callable[[LogLevel, str], None]] = None
+    _qt_dispatcher: Any = None
     _show_timestamps: bool = True
     _stdout_enabled: bool = True
     
@@ -58,6 +59,40 @@ class Logger:
     def set_console_callback(cls, callback: Optional[Callable[[LogLevel, str], None]]):
         """Set the callback for sending logs to console window."""
         cls._console_callback = callback
+        cls._qt_dispatcher = None
+
+        if callback is None:
+            return
+
+        # If Qt is available and an application exists, route logs through a Qt signal so that
+        # UI updates happen on the main thread (avoids intermittent native crashes).
+        try:
+            from PySide6.QtCore import QObject, Signal, QCoreApplication
+        except Exception:
+            return
+
+        app = QCoreApplication.instance()
+        if app is None:
+            return
+
+        class _QtLogDispatcher(QObject):
+            log_message = Signal(object, str)
+
+        dispatcher = _QtLogDispatcher()
+        try:
+            dispatcher.moveToThread(app.thread())
+        except Exception:
+            pass
+
+        def _deliver(level: object, message: str) -> None:
+            try:
+                callback(level, message)  # type: ignore[arg-type]
+            except Exception:
+                # Never crash on logging delivery.
+                pass
+
+        dispatcher.log_message.connect(_deliver)
+        cls._qt_dispatcher = dispatcher
 
     @classmethod
     def set_stdout_enabled(cls, enabled: bool):
@@ -208,7 +243,14 @@ class Logger:
             formatted_clean = cls._format_message(level, message, include_ansi=False)
             
             if cls._console_callback:
-                cls._console_callback(level, formatted_clean)
+                if cls._qt_dispatcher is not None:
+                    try:
+                        cls._qt_dispatcher.log_message.emit(level, formatted_clean)
+                    except Exception:
+                        # Fallback to direct call.
+                        cls._console_callback(level, formatted_clean)
+                else:
+                    cls._console_callback(level, formatted_clean)
             
             if cls._log_file:
                  cls._log_to_file(formatted_clean)

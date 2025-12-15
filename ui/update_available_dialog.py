@@ -10,6 +10,9 @@ from PySide6.QtWidgets import QDialog, QFrame, QHBoxLayout, QLabel, QPushButton,
 
 from .brand import BrandColors
 from .icons import IconType, IconUtils
+from .update_method_dialog import UpdateMethodDialog
+from .update_git_instructions_dialog import UpdateGitInstructionsDialog
+from .update_download_dialog import UpdateDownloadDialog
 
 
 def _format_version(version: Optional[str]) -> str:
@@ -42,6 +45,7 @@ class UpdateAvailableDialog(QDialog):
     def __init__(self, info: UpdateAvailableInfo, parent=None):
         super().__init__(parent)
         self._info = info
+        self._install_button: QPushButton | None = None
 
         self.setWindowTitle("Update Available")
         self.setModal(True)
@@ -215,8 +219,24 @@ class UpdateAvailableDialog(QDialog):
         install.setIcon(QIcon(self._icon_path("download-cloud.svg")))
         install.setIconSize(QSize(16, 16))
         layout.addWidget(install, 1)
+        install.clicked.connect(self._on_install_clicked)
+        self._install_button = install
 
         return row
+
+    def _on_install_clicked(self) -> None:
+        dialog = UpdateMethodDialog(parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        method = (dialog.selected_method or "").strip().lower()
+        if method == "git":
+            UpdateGitInstructionsDialog(parent=self).exec()
+            return
+
+        if method == "auto":
+            UpdateDownloadDialog(remote_version=self._info.remote_version, parent=self).exec()
+            return
 
     def _open_release_notes(self) -> None:
         QDesktopServices.openUrl(QUrl(self._info.release_notes_url))

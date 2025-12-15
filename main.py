@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QSizePolicy
 )
 from PySide6.QtCore import Signal, Slot, Qt, QProcess
+from PySide6.QtCore import QTimer
 import qasync
 
 from deepseek_driver import DeepSeekDriver
@@ -175,15 +176,25 @@ class MainWindow(QMainWindow):
         if getattr(self, "_update_dialog_open", False):
             return
 
-        self._update_dialog_open = True
-        try:
-            dialog = UpdateAvailableDialog(
-                UpdateAvailableInfo(local_version=local_version, remote_version=remote_version),
-                parent=self,
-            )
-            dialog.exec()
-        finally:
-            self._update_dialog_open = False
+        def show():
+            if getattr(self, "_update_dialog_open", False):
+                return
+            if not self.isVisible():
+                return
+
+            self._update_dialog_open = True
+            try:
+                dialog = UpdateAvailableDialog(
+                    UpdateAvailableInfo(local_version=local_version, remote_version=remote_version),
+                    parent=self,
+                )
+                dialog.exec()
+            finally:
+                self._update_dialog_open = False
+
+        # make sure the dialog is shown from the running UI event loop to avoid
+        # early-startup edge cases (startup update checks complete very quickly).
+        QTimer.singleShot(0, show)
 
     def _maybe_check_for_updates_on_startup(self):
         try:
