@@ -22,6 +22,7 @@ class UpdateFailed(RuntimeError):
 
 DEFAULT_PAYLOAD_DIRNAME = "intense-rp-next"
 DEFAULT_OPTIONAL_DIRNAME = "optional"
+DEFAULT_LOCK_WAIT_S = 300.0
 
 
 @dataclass(frozen=True)
@@ -91,7 +92,21 @@ def _wait_for_pid(pid: int, *, timeout_s: float = 120.0) -> None:
         raise UpdateFailed("Timed out waiting for the app to exit.")
 
 
-def _retry(action, *, retries: int = 240, delay_s: float = 0.25) -> None:
+def _is_windows_lock_error(exc: BaseException) -> bool:
+    if not isinstance(exc, OSError):
+        return False
+    winerror = getattr(exc, "winerror", None)
+    # 32 = ERROR_SHARING_VIOLATION, 5 = ERROR_ACCESS_DENIED (sometimes from locks).
+    return winerror in (32, 5)
+
+
+def _retry(
+    action,
+    *,
+    retries: int = 240,
+    delay_s: float = 0.25,
+    on_retry=None,
+) -> None:
     last_exc: Optional[BaseException] = None
     for attempt in range(retries):
         try:
@@ -99,11 +114,53 @@ def _retry(action, *, retries: int = 240, delay_s: float = 0.25) -> None:
             return
         except Exception as exc:
             last_exc = exc
+            if on_retry is not None:
+                try:
+                    on_retry(exc, attempt + 1, retries)
+                except Exception:
+                    pass
             if attempt >= retries - 1:
                 raise
             time.sleep(delay_s)
     if last_exc is not None:
         raise last_exc
+
+
+def _stop_processes_under_dir(install_dir: Path) -> None:
+    try:
+        import psutil  # type: ignore
+    except Exception:
+        return
+
+    prefix = str(install_dir.resolve()).lower()
+    me = os.getpid()
+
+    procs = []
+    for p in psutil.process_iter(["pid", "exe", "name"]):
+        try:
+            pid = int(p.info.get("pid") or 0)
+            if pid <= 0 or pid == me:
+                continue
+            exe = p.info.get("exe") or ""
+            if not exe:
+                continue
+            if str(exe).lower().startswith(prefix):
+                procs.append(p)
+        except Exception:
+            continue
+
+    for p in procs:
+        try:
+            p.terminate()
+        except Exception:
+            pass
+
+    _, alive = psutil.wait_procs(procs, timeout=3.0)
+    for p in alive:
+        try:
+            p.kill()
+        except Exception:
+            pass
 
 
 def _merge_copy_dir(src: Path, dst: Path) -> None:
@@ -152,6 +209,10 @@ def _perform_update(args: UpdateArgs, *, status_cb, progress_cb) -> None:
     status_cb("Waiting for the app to close…")
     progress_cb(5)
     _wait_for_pid(args.app_pid, timeout_s=240.0)
+    try:
+        _stop_processes_under_dir(install_dir)
+    except Exception:
+        pass
 
     if not install_dir.exists() or not install_dir.is_dir():
         raise UpdateFailed(f"Install directory not found: {install_dir}")
@@ -166,7 +227,28 @@ def _perform_update(args: UpdateArgs, *, status_cb, progress_cb) -> None:
     def do_backup() -> None:
         install_dir.rename(backup_dir)
 
-    _retry(do_backup)
+    last_hint_at = 0.0
+
+    def on_backup_retry(exc: BaseException, attempt: int, total: int) -> None:
+        nonlocal last_hint_at
+        if not _is_windows_lock_error(exc):
+            return
+        now = time.monotonic()
+        if now - last_hint_at < 2.0:
+            return
+        last_hint_at = now
+        status_cb(
+            "Waiting for Windows to release files…\n"
+            "Close File Explorer windows opened to the app folder and try again."
+        )
+
+    lock_wait_s = DEFAULT_LOCK_WAIT_S if sys.platform.startswith("win") else 60.0
+    _retry(
+        do_backup,
+        retries=max(1, int(lock_wait_s / 0.25)),
+        delay_s=0.25,
+        on_retry=on_backup_retry,
+    )
 
     try:
         status_cb("Installing new version…")
@@ -225,8 +307,17 @@ def _perform_update(args: UpdateArgs, *, status_cb, progress_cb) -> None:
         progress_cb(100)
     except Exception:
         try:
-            if backup_dir.exists() and not install_dir.exists():
-                backup_dir.rename(install_dir)
+            if backup_dir.exists():
+                try:
+                    if install_dir.exists():
+                        shutil.rmtree(install_dir)
+                except Exception:
+                    pass
+                try:
+                    if not install_dir.exists():
+                        backup_dir.rename(install_dir)
+                except Exception:
+                    pass
         except Exception:
             pass
         raise
@@ -298,7 +389,14 @@ class UpdateWindow(QWidget):
         QApplication.instance().quit()
 
     def _on_failed(self, message: str) -> None:
-        self._label.setText(f"Update failed:\n{message}")
+        hint = ""
+        lowered = (message or "").lower()
+        if "winerror 32" in lowered or "being used" in lowered or "access" in lowered:
+            hint = (
+                "\n\nTip: close any File Explorer windows opened to the app folder "
+                "(and disable Preview pane), then try again."
+            )
+        self._label.setText(f"Update failed:\n{message}{hint}")
         self._thread.quit()
         self._thread.wait(1000)
 
@@ -352,4 +450,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -405,7 +405,6 @@ class UpdateDownloadDialog(QDialog):
         # Close this dialog immediately, then quit the app.
         self.accept()
         QTimer.singleShot(0, lambda: QApplication.instance().quit() if QApplication.instance() else None)
-        QTimer.singleShot(250, lambda: os._exit(0))
 
     def _icon_path(self, filename: str) -> str:
         import os
