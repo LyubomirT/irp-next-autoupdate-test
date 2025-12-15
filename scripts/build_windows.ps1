@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
   [string]$AppName = "intenserp-next-v2",
-  [string]$PackageName = "intenserp-next-v2-win32-x64"
+  [string]$PackageName = "intenserp-next-v2-win32-x64",
+  [string]$PackageAppDirName = "intense-rp-next",
+  [string]$PackageOptionalDirName = "optional"
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,10 +12,12 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $RepoRoot
 
 $EntryPoint = Join-Path $RepoRoot "main.py"
+$UpdaterEntryPoint = Join-Path $RepoRoot "updater/main.py"
 $IconPath = Join-Path $RepoRoot "ui/assets/brand/newlogo.ico"
 $VersionPath = Join-Path $RepoRoot "version.txt"
 
 if (!(Test-Path $EntryPoint)) { throw "Entry point not found: $EntryPoint" }
+if (!(Test-Path $UpdaterEntryPoint)) { throw "Updater entry point not found: $UpdaterEntryPoint" }
 if (!(Test-Path $IconPath)) { throw "Icon not found: $IconPath" }
 if (!(Test-Path $VersionPath)) { throw "version.txt not found: $VersionPath" }
 
@@ -50,6 +54,32 @@ if (!(Test-Path $BuiltAppDir)) { throw "PyInstaller output folder not found: $Bu
 # version.txt must be present at the package root (convenience copy; runtime uses bundled data).
 Copy-Item -Force $VersionPath (Join-Path $BuiltAppDir "version.txt")
 
+# Build updater (onefile) into dist/updater.exe
+$updaterWorkDir = Join-Path $BuildDir "updater-work"
+$updaterSpecDir = Join-Path $BuildDir "updater-spec"
+if (Test-Path $updaterWorkDir) { Remove-Item -Recurse -Force $updaterWorkDir }
+if (Test-Path $updaterSpecDir) { Remove-Item -Recurse -Force $updaterSpecDir }
+New-Item -ItemType Directory -Path $updaterWorkDir | Out-Null
+New-Item -ItemType Directory -Path $updaterSpecDir | Out-Null
+
+$updaterArgs = @(
+  "--noconfirm"
+  "--clean"
+  "--onefile"
+  "--noconsole"
+  "--name", "updater"
+  "--icon", $IconPath
+  "--distpath", $DistDir
+  "--workpath", $updaterWorkDir
+  "--specpath", $updaterSpecDir
+  $UpdaterEntryPoint
+)
+
+python -m PyInstaller @updaterArgs
+
+$UpdaterExe = Join-Path $DistDir "updater.exe"
+if (!(Test-Path $UpdaterExe)) { throw "Updater output not found: $UpdaterExe" }
+
 # Make sure logs/configs are not shipped (even if present locally).
 foreach ($root in @($BuiltAppDir, (Join-Path $BuiltAppDir "_internal"))) {
   if (!(Test-Path $root)) { continue }
@@ -67,10 +97,16 @@ $StagingDir = Join-Path $DistDir $PackageName
 if (Test-Path $StagingDir) { Remove-Item -Recurse -Force $StagingDir }
 New-Item -ItemType Directory -Path $StagingDir | Out-Null
 
-Copy-Item -Recurse -Force (Join-Path $BuiltAppDir "*") $StagingDir
+$MainStage = Join-Path $StagingDir $PackageAppDirName
+$OptionalStage = Join-Path $StagingDir $PackageOptionalDirName
+New-Item -ItemType Directory -Path $MainStage | Out-Null
+New-Item -ItemType Directory -Path $OptionalStage | Out-Null
+
+Copy-Item -Recurse -Force (Join-Path $BuiltAppDir "*") $MainStage
+Copy-Item -Force $UpdaterExe (Join-Path $OptionalStage "updater.exe")
 
 $ZipPath = Join-Path $DistDir "$PackageName.zip"
 if (Test-Path $ZipPath) { Remove-Item -Force $ZipPath }
-Compress-Archive -Path $StagingDir -DestinationPath $ZipPath -Force
+Compress-Archive -Path (Join-Path $StagingDir "*") -DestinationPath $ZipPath -Force
 
 Write-Output "Created release asset: $ZipPath"

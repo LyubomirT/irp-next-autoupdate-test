@@ -22,11 +22,18 @@ from PySide6.QtWidgets import (
 
 from .brand import BrandColors
 from utils.auto_update import AutoUpdateError, PreparedUpdate, prepare_update_from_github, DownloadProgress
-from utils.windows_self_updater import (
-    WindowsUpdatePlan,
-    write_apply_update_powershell_script,
-    DEFAULT_PRESERVE_PATHS,
-)
+
+
+class MissingUpdaterError(RuntimeError):
+    pass
+
+
+def _find_staged_updater(prepared: PreparedUpdate) -> Path:
+    package_root = prepared.extracted_app_root.resolve().parent
+    updater_path = package_root / "optional" / "updater.exe"
+    if updater_path.exists():
+        return updater_path
+    raise MissingUpdaterError(f"Update package does not contain {updater_path}")
 
 
 def _format_bytes(n: Optional[int]) -> str:
@@ -364,32 +371,30 @@ class UpdateDownloadDialog(QDialog):
 
         install_dir = Path(sys.executable).resolve().parent
         exe_name = Path(sys.executable).name
-        plan = WindowsUpdatePlan(
-            install_dir=install_dir,
-            staged_app_root=prepared.extracted_app_root,
-            exe_name=exe_name,
-            preserve_paths=DEFAULT_PRESERVE_PATHS,
-        )
         try:
-            script_path = write_apply_update_powershell_script(plan=plan, app_pid=os.getpid())
+            updater_exe = _find_staged_updater(prepared)
         except Exception as exc:
-            QMessageBox.warning(self, "Auto-Update", f"Failed to prepare the installer.\n\n{exc}")
+            QMessageBox.warning(self, "Auto-Update", f"Update package is missing the updater.\n\n{exc}")
             return
 
         args = [
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(script_path),
+            "--install-dir",
+            str(install_dir),
+            "--app-pid",
+            str(os.getpid()),
+            "--exe-name",
+            str(exe_name),
+            "--payload-dir",
+            str(prepared.extracted_app_root),
         ]
-        detached_result = QProcess.startDetached("powershell", args)
+
+        detached_result = QProcess.startDetached(str(updater_exe), args)
         ok = detached_result[0] if isinstance(detached_result, tuple) else bool(detached_result)
         if not ok:
             QMessageBox.warning(
                 self,
                 "Auto-Update",
-                "Failed to start the Windows installer (PowerShell).\n\n"
+                "Failed to start the updater.\n\n"
                 "You can still download manually from the release page.",
             )
             from PySide6.QtCore import QUrl

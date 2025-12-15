@@ -25,6 +25,81 @@ from utils.logger import Logger, LogLevel
 from utils.update_checker import check_for_updates
 
 
+def _parse_update_cleanup_args(argv: list[str]) -> tuple[list[str], bool, str | None]:
+    """
+    Parse and remove internal updater cleanup args from argv.
+
+    Supported forms:
+      --deleteupdater
+      --updaterpath <path>
+      --updaterpath=<path>
+    """
+    remaining: list[str] = []
+    delete_updater = False
+    updater_path: str | None = None
+
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--deleteupdater":
+            delete_updater = True
+            i += 1
+            continue
+
+        if arg == "--updaterpath":
+            if i + 1 < len(argv):
+                updater_path = argv[i + 1]
+                i += 2
+                continue
+            i += 1
+            continue
+
+        if arg.startswith("--updaterpath="):
+            updater_path = arg.split("=", 1)[1] or None
+            i += 1
+            continue
+
+        remaining.append(arg)
+        i += 1
+
+    return remaining, delete_updater, updater_path
+
+
+def _delete_updater_best_effort(updater_path: Path) -> None:
+    try:
+        p = updater_path.expanduser()
+        try:
+            p = p.resolve()
+        except Exception:
+            p = p.absolute()
+    except Exception:
+        return
+
+    for _ in range(40):
+        try:
+            if p.exists():
+                p.unlink()
+            break
+        except Exception:
+            import time
+
+            time.sleep(0.25)
+
+    try:
+        parent = p.parent
+        if parent.exists():
+            parent.rmdir()
+    except Exception:
+        pass
+
+    try:
+        pkg_root = p.parent.parent
+        if pkg_root.exists():
+            pkg_root.rmdir()
+    except Exception:
+        pass
+
+
 def _resolve_resource_path(*parts: str) -> Path:
     """
     Resolve a resource path in both dev and PyInstaller-frozen runs.
@@ -525,6 +600,9 @@ class MainWindow(QMainWindow):
         asyncio.create_task(cleanup_and_close())
 
 def main():
+    remaining_args, delete_updater, updater_path = _parse_update_cleanup_args(sys.argv[1:])
+    sys.argv = [sys.argv[0]] + remaining_args
+
     app = QApplication(sys.argv)
 
     from ui.app_icon import get_app_icon
@@ -571,6 +649,17 @@ def main():
 
     window = MainWindow()
     window.show()
+
+    if delete_updater and updater_path:
+        try:
+            target = Path(updater_path)
+
+            def worker() -> None:
+                _delete_updater_best_effort(target)
+
+            threading.Thread(target=worker, daemon=True).start()
+        except Exception:
+            pass
 
     with loop:
         loop.run_forever()
