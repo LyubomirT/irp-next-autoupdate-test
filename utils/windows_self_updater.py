@@ -53,13 +53,46 @@ $ExeName    = "{_ps_escape(exe_name)}"
 $AppPid     = {int(app_pid)}
 $Preserve   = {preserve_ps}
 $BackupDir  = $null
+$LogPath    = $null
 
 function Write-UpdateLog([string]$Message) {{
   $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
   try {{
-    Add-Content -Path (Join-Path $InstallDir "update_install.log") -Value "[$stamp] $Message"
+    if (-not $LogPath) {{
+      return
+    }}
+    Add-Content -Path $LogPath -Value "[$stamp] $Message"
   }} catch {{
     # best-effort
+  }}
+}}
+
+function Set-SafeWorkingDirectory() {{
+  try {{
+    if ($env:TEMP) {{
+      Set-Location -Path $env:TEMP
+      return
+    }}
+  }} catch {{}}
+  try {{
+    Set-Location -Path ([System.IO.Path]::GetTempPath())
+  }} catch {{}}
+}}
+
+function Init-UpdateLog() {{
+  try {{
+    $base = $env:TEMP
+    if (-not $base) {{
+      $base = [System.IO.Path]::GetTempPath()
+    }}
+    $dir = Join-Path $base "IntenseRPNext"
+    if (-not (Test-Path -LiteralPath $dir)) {{
+      New-Item -ItemType Directory -Path $dir | Out-Null
+    }}
+    $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $LogPath = Join-Path $dir ("update_install_" + $stamp + "_" + [System.Guid]::NewGuid().ToString("N") + ".log")
+  }} catch {{
+    $LogPath = $null
   }}
 }}
 
@@ -74,6 +107,36 @@ function Wait-ForProcessExit([int]$ProcessId, [int]$TimeoutSec = 120) {{
   throw "Timed out waiting for the app to exit."
 }}
 
+function Retry-ItemOperation([scriptblock]$Operation, [int]$Retries = 240, [int]$DelayMs = 250) {{
+  for ($i = 0; $i -lt $Retries; $i++) {{
+    try {{
+      & $Operation
+      return
+    }} catch {{
+      $msg = $_.Exception.Message
+      if ($i -ge ($Retries - 1)) {{ throw }}
+      Start-Sleep -Milliseconds $DelayMs
+    }}
+  }}
+}}
+
+function Stop-ProcessesUnderDir([string]$Dir) {{
+  if (-not $Dir) {{ return }}
+  try {{
+    $procs = Get-CimInstance Win32_Process | Where-Object {{ $_.ExecutablePath -and $_.ExecutablePath.StartsWith($Dir, [System.StringComparison]::OrdinalIgnoreCase) }}
+  }} catch {{
+    return
+  }}
+  foreach ($p in $procs) {{
+    try {{
+      Write-UpdateLog ("Stopping process " + $p.ProcessId + " (" + $p.Name + ") " + $p.ExecutablePath)
+      Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+    }} catch {{
+      # ignore
+    }}
+  }}
+}}
+
 function Merge-Dir([string]$From, [string]$To) {{
   if (-not (Test-Path -LiteralPath $From)) {{ return }}
   if (-not (Test-Path -LiteralPath $To)) {{
@@ -83,8 +146,12 @@ function Merge-Dir([string]$From, [string]$To) {{
 }}
 
 try {{
+  Set-SafeWorkingDirectory
+  Init-UpdateLog
   Write-UpdateLog "Starting update. StagedDir=$StagedDir"
   Wait-ForProcessExit -ProcessId $AppPid
+  Start-Sleep -Milliseconds 750
+  Stop-ProcessesUnderDir -Dir $InstallDir
 
   if (-not (Test-Path -LiteralPath $InstallDir)) {{
     throw "Install directory not found: $InstallDir"
@@ -101,10 +168,10 @@ try {{
   $BackupDir = "$InstallDir.__backup_$timestamp"
 
   Write-UpdateLog "Renaming install dir to backup: $BackupDir"
-  Rename-Item -LiteralPath $InstallDir -NewName (Split-Path -Leaf $BackupDir)
+  Retry-ItemOperation -Operation {{ Rename-Item -LiteralPath $InstallDir -NewName (Split-Path -Leaf $BackupDir) }}
 
   Write-UpdateLog "Moving staged build into place."
-  Move-Item -LiteralPath $StagedDir -Destination $InstallDir
+  Retry-ItemOperation -Operation {{ Move-Item -LiteralPath $StagedDir -Destination $InstallDir }}
 
   foreach ($p in $Preserve) {{
     $oldPath = Join-Path $BackupDir $p
@@ -119,6 +186,14 @@ try {{
         Copy-Item -Force -LiteralPath $oldPath -Destination $newPath -ErrorAction SilentlyContinue
       }}
     }}
+  }}
+
+  try {{
+    if ($LogPath -and (Test-Path -LiteralPath $LogPath)) {{
+      Copy-Item -Force -LiteralPath $LogPath -Destination (Join-Path $InstallDir "update_install.log") -ErrorAction SilentlyContinue
+    }}
+  }} catch {{
+    # best-effort
   }}
 
   Write-UpdateLog "Launching updated app."

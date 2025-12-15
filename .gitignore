@@ -11,3 +11,6 @@ logs/
 config_dir.txt
 comp.png
 raw.png
+dist/
+build/
+*.spec
