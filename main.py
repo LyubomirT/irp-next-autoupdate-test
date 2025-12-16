@@ -23,6 +23,8 @@ from ui.icons import IconUtils, IconType
 from ui.update_available_dialog import UpdateAvailableDialog, UpdateAvailableInfo
 from utils.logger import Logger, LogLevel
 from utils.update_checker import check_for_updates
+import shutil
+import time
 
 
 def _parse_update_cleanup_args(argv: list[str]) -> tuple[list[str], bool, str | None]:
@@ -65,9 +67,15 @@ def _parse_update_cleanup_args(argv: list[str]) -> tuple[list[str], bool, str | 
     return remaining, delete_updater, updater_path
 
 
-def _delete_updater_best_effort(updater_path: Path) -> None:
+def _delete_updater_best_effort(cleanup_path: Path) -> None:
+    """
+    Clean up the temp extraction directory left behind by the updater.
+    
+    The updater now passes its temp directory path directly (e.g.,
+    C:/Users/.../Temp/intenserp-update-extract-xyz/), so we just delete it.
+    """
     try:
-        p = updater_path.expanduser()
+        p = cleanup_path.expanduser()
         try:
             p = p.resolve()
         except Exception:
@@ -75,29 +83,19 @@ def _delete_updater_best_effort(updater_path: Path) -> None:
     except Exception:
         return
 
-    for _ in range(40):
+    if not p.exists():
+        return
+
+    # Wait a bit for the updater process to fully exit
+    time.sleep(1.0)
+
+    # Try to delete the entire temp directory tree
+    for attempt in range(30):  # ~15 seconds of retries
         try:
-            if p.exists():
-                p.unlink()
-            break
+            shutil.rmtree(p)
+            return  # Success!
         except Exception:
-            import time
-
-            time.sleep(0.25)
-
-    try:
-        parent = p.parent
-        if parent.exists():
-            parent.rmdir()
-    except Exception:
-        pass
-
-    try:
-        pkg_root = p.parent.parent
-        if pkg_root.exists():
-            pkg_root.rmdir()
-    except Exception:
-        pass
+            time.sleep(0.5)
 
 
 def _resolve_resource_path(*parts: str) -> Path:

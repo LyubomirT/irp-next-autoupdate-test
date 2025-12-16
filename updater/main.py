@@ -299,7 +299,10 @@ def _perform_update(args: UpdateArgs, *, status_cb, progress_cb) -> None:
 
         cmd = [str(exe_path)]
         if _is_frozen():
-            cmd += ["--deleteupdater", "--updaterpath", str(updater_path)]
+            # Pass the temp extraction root directory for cleanup (not just the updater.exe path)
+            # Structure: .../intenserp-update-extract-xyz/optional/updater.exe
+            temp_cleanup_dir = updater_path.parent.parent
+            cmd += ["--deleteupdater", "--updaterpath", str(temp_cleanup_dir)]
 
         subprocess.Popen(
             cmd,

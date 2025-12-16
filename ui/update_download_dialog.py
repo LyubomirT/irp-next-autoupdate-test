@@ -240,7 +240,7 @@ class UpdateDownloadDialog(QDialog):
         self._cancel_btn.clicked.connect(self._on_cancel_clicked)
         layout.addWidget(self._cancel_btn, 1)
 
-        self._install_btn = QPushButton("Install & Restart")
+        self._install_btn = QPushButton("Install && Restart")
         self._install_btn.setCursor(Qt.PointingHandCursor)
         self._install_btn.setEnabled(False)
         self._install_btn.setStyleSheet(
@@ -402,9 +402,17 @@ class UpdateDownloadDialog(QDialog):
             QDesktopServices.openUrl(QUrl(prepared.release_html_url))
             return
 
-        # Close this dialog immediately, then quit the app.
-        self.accept()
-        QTimer.singleShot(0, lambda: QApplication.instance().quit() if QApplication.instance() else None)
+        # The updater waits for our process to exit before performing the update,
+        # so we can safely force-exit without async cleanup (which can hang/crash).
+        self._status_label.setText("Running Updater...")
+        self._install_btn.setEnabled(False)
+        self._cancel_btn.setEnabled(False)
+        self._progress.setRange(0, 0)  # indeterminate spinner
+
+        def force_exit():
+            os._exit(0)
+
+        QTimer.singleShot(500, force_exit)
 
     def _icon_path(self, filename: str) -> str:
         import os
