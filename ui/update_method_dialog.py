@@ -21,20 +21,14 @@ class UpdateMethodAvailability:
 
 def default_update_method_availability() -> UpdateMethodAvailability:
     frozen = bool(getattr(sys, "frozen", False))
-    is_windows = sys.platform.startswith("win")
 
     # From source runs can be updated via Git; PyInstaller builds do not have a git checkout.
     git_enabled = not frozen
     git_reason = "" if git_enabled else "Git updates are available only when running from source."
 
-    # Auto-update currently targets the Windows packaged build.
-    auto_enabled = frozen and is_windows
-    if auto_enabled:
-        auto_reason = ""
-    elif not frozen:
-        auto_reason = "Not available on source runs."
-    else:
-        auto_reason = "Auto-update is available only on Windows."
+    # Auto-update is available for packaged builds on Windows and Linux.
+    auto_enabled = frozen
+    auto_reason = "" if auto_enabled else "Not available on source runs."
 
     return UpdateMethodAvailability(
         git_enabled=git_enabled,
