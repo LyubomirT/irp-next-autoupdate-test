@@ -1,12 +1,14 @@
 import os
+import sys
 import time
 import json
 import asyncio
 import re
 import httpx
 import tempfile
+import subprocess
 from pathlib import Path
-from typing import List, Union, Any, Dict
+from typing import List, Union, Any, Dict, Callable, Optional
 from patchright.async_api import async_playwright, Page, Browser, BrowserContext
 from dotenv import load_dotenv
 from utils.cache_manager import CacheManager
@@ -36,11 +38,132 @@ class DeepSeekDriver:
         base_dir = Path(config_dir) if config_dir is not None else Path("config_data")
         return str((base_dir / "playwright_profiles" / "deepseek").resolve())
 
-    async def start(self):
+    async def ensure_browser_installed(self, status_callback: Optional[Callable[[str], None]] = None) -> bool:
+        """
+        Ensures the patchright chromium browser is installed.
+        Returns True if installation was performed, False if already installed.
+        Uses async subprocess to avoid blocking the UI event loop.
+        
+        Args:
+            status_callback: Optional callback to report status updates (e.g., for UI updates)
+        """
+        # Check if chromium is already installed by trying to get the executable path
+        # The patchright/playwright browsers are stored in a known location
+        try:
+            # Try to import and check the browser registry
+            import patchright._impl._driver as driver_module
+            driver_executable, driver_cli = driver_module.compute_driver_executable()
+            
+            # Run 'patchright install chromium --dry-run' equivalent check (async)
+            try:
+                check_process = await asyncio.create_subprocess_exec(
+                    str(driver_cli), "install", "chromium", "--dry-run",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                )
+                stdout, stderr = await asyncio.wait_for(check_process.communicate(), timeout=30)
+                stdout_text = stdout.decode() if stdout else ""
+                
+                # If dry-run indicates installation is needed, do it
+                if check_process.returncode != 0 or "chromium" in stdout_text.lower():
+                    return await self._run_browser_install(driver_cli, status_callback)
+                
+                Logger.debug("Chromium browser is already installed.")
+                return False
+                
+            except asyncio.TimeoutError:
+                Logger.warning("Browser check timed out, attempting installation...")
+                return await self._run_browser_install(driver_cli, status_callback)
+            
+        except ImportError:
+            # Fallback: try running patchright CLI directly
+            Logger.debug("Could not import patchright driver, trying CLI fallback...")
+            return await self._install_browser_via_cli(status_callback)
+        except FileNotFoundError:
+            # Driver not found, try CLI fallback
+            return await self._install_browser_via_cli(status_callback)
+        except Exception as e:
+            Logger.warning(f"Browser check failed: {e}, attempting installation...")
+            return await self._install_browser_via_cli(status_callback)
+
+    async def _run_browser_install(self, driver_cli, status_callback: Optional[Callable[[str], None]] = None) -> bool:
+        """
+        Run the browser installation using the patchright driver CLI (async).
+        """
+        Logger.info("Chromium browser not found. Installing...")
+        if status_callback:
+            status_callback("Installing Playwright browser...")
+        
+        try:
+            install_process = await asyncio.create_subprocess_exec(
+                str(driver_cli), "install", "chromium",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            )
+            stdout, stderr = await asyncio.wait_for(install_process.communicate(), timeout=300)
+            
+            if install_process.returncode == 0:
+                Logger.success("Chromium browser installed successfully.")
+                return True
+            else:
+                error_msg = stderr.decode() if stderr else "Unknown error"
+                Logger.error(f"Failed to install Chromium browser: {error_msg}")
+                raise RuntimeError(f"Failed to install Chromium browser: {error_msg}")
+                
+        except asyncio.TimeoutError:
+            Logger.error("Browser installation timed out.")
+            raise RuntimeError("Browser installation timed out after 5 minutes.")
+
+    async def _install_browser_via_cli(self, status_callback: Optional[Callable[[str], None]] = None) -> bool:
+        """
+        Fallback method to install browser using patchright CLI (async).
+        """
+        Logger.info("Installing Chromium browser via CLI...")
+        if status_callback:
+            status_callback("Installing Playwright browser...")
+        
+        try:
+            # Use sys.executable to run the patchright module (async)
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "patchright", "install", "chromium",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            )
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
+            
+            if process.returncode == 0:
+                Logger.success("Chromium browser installed successfully.")
+                return True
+            else:
+                error_msg = (stderr.decode() if stderr else "") or (stdout.decode() if stdout else "") or "Unknown error"
+                Logger.error(f"Failed to install Chromium browser: {error_msg}")
+                raise RuntimeError(f"Failed to install Chromium browser: {error_msg}")
+                
+        except asyncio.TimeoutError:
+            Logger.error("Browser installation timed out.")
+            raise RuntimeError("Browser installation timed out after 5 minutes.")
+        except Exception as e:
+            Logger.error(f"Browser installation failed: {e}")
+            raise RuntimeError(f"Browser installation failed: {e}")
+
+    async def start(self, status_callback: Optional[Callable[[str], None]] = None):
         """
         Starts the browser and navigates to DeepSeek.
+        
+        Args:
+            status_callback: Optional callback to report status updates (e.g., for UI updates)
         """
         Logger.info("Starting DeepSeek Driver...")
+        
+        # Ensure browser is installed before starting
+        await self.ensure_browser_installed(status_callback)
+        
+        if status_callback:
+            status_callback("Launching Browser...")
+        
         self.playwright = await async_playwright().start()
         persistent_sessions = bool(self.config_manager.get_setting("system_settings", "persistent_sessions"))
 
