@@ -29,8 +29,13 @@ class MissingUpdaterError(RuntimeError):
 
 
 def _find_staged_updater(prepared: PreparedUpdate) -> Path:
+    """Find the updater binary in the staged update package."""
     package_root = prepared.extracted_app_root.resolve().parent
-    updater_path = package_root / "optional" / "updater.exe"
+    if sys.platform.startswith("win"):
+        updater_name = "updater.exe"
+    else:
+        updater_name = "updater"
+    updater_path = package_root / "optional" / updater_name
     if updater_path.exists():
         return updater_path
     raise MissingUpdaterError(f"Update package does not contain {updater_path}")
@@ -273,8 +278,8 @@ class UpdateDownloadDialog(QDialog):
         return row
 
     def _start_worker(self) -> None:
-        if not sys.platform.startswith("win"):
-            QMessageBox.warning(self, "Auto-Update", "Auto-update is currently supported only on Windows.")
+        if not sys.platform.startswith(("win", "linux")):
+            QMessageBox.warning(self, "Auto-Update", "Auto-update is supported only on Windows and Linux.")
             self.reject()
             return
 

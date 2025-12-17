@@ -177,18 +177,21 @@ def _merge_copy_dir(src: Path, dst: Path) -> None:
             shutil.copy2(item, dest)
 
 
+def _select_main_executable(install_dir: Path, preferred_name: Optional[str]) -> Path:
+    """Find the main app executable in install_dir."""
+    if not preferred_name:
+        raise UpdateFailed("No executable name provided")
+    
+    candidate = install_dir / preferred_name
+    if candidate.exists():
+        return candidate
+    
+    raise UpdateFailed(f"Could not locate executable '{preferred_name}' in {install_dir}")
+
+
+# Keep old name as alias
 def _select_main_exe(install_dir: Path, preferred_name: Optional[str]) -> Path:
-    if preferred_name:
-        candidate = install_dir / preferred_name
-        if candidate.exists():
-            return candidate
-
-    exes = [p for p in install_dir.glob("*.exe") if p.is_file() and p.name.lower() != "updater.exe"]
-    if not exes:
-        raise UpdateFailed(f"Could not locate an .exe in {install_dir}")
-
-    exes.sort(key=lambda p: (p.stat().st_size, p.name.lower()), reverse=True)
-    return exes[0]
+    return _select_main_executable(install_dir, preferred_name)
 
 
 def _timestamp() -> str:
@@ -400,11 +403,13 @@ class UpdateWindow(QWidget):
     def _on_failed(self, message: str) -> None:
         hint = ""
         lowered = (message or "").lower()
-        if "winerror 32" in lowered or "being used" in lowered or "access" in lowered:
-            hint = (
-                "\n\nTip: close any File Explorer windows opened to the app folder "
-                "(and disable Preview pane), then try again."
-            )
+        # Windows-specific file locking hints
+        if sys.platform.startswith("win"):
+            if "winerror 32" in lowered or "being used" in lowered or "access" in lowered:
+                hint = (
+                    "\n\nTip: close any File Explorer windows opened to the app folder "
+                    "(and disable Preview pane), then try again."
+                )
         self._label.setText(f"Update failed:\n{message}{hint}")
         self._thread.quit()
         self._thread.wait(1000)
@@ -446,8 +451,8 @@ def _parse_args(argv: list[str]) -> UpdateArgs:
 
 
 def main() -> int:
-    if not sys.platform.startswith("win"):
-        print("This updater currently supports Windows only.", file=sys.stderr)
+    if not sys.platform.startswith(("win", "linux")):
+        print(f"This updater supports Windows and Linux only (got {sys.platform}).", file=sys.stderr)
         return 2
 
     args = _parse_args(sys.argv[1:])

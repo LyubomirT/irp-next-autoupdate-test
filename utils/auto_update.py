@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import re
+import sys
+import tarfile
 import time
 import zipfile
 from dataclasses import dataclass
@@ -34,6 +36,15 @@ class PreparedUpdate:
     asset_name: str
     asset_download_url: str
     extracted_app_root: Path
+
+
+def get_current_platform() -> str:
+    """Returns 'windows' or 'linux' based on current platform."""
+    if sys.platform.startswith("win"):
+        return "windows"
+    elif sys.platform.startswith("linux"):
+        return "linux"
+    raise AutoUpdateError(f"Unsupported platform: {sys.platform}")
 
 
 def normalize_tag(version: str) -> str:
@@ -69,21 +80,43 @@ def fetch_release_by_tag(
     return data
 
 
-def _score_asset_name(name: str) -> int:
+def _score_asset_name(name: str, platform: str) -> int:
+    """Score an asset name based on how well it matches the target platform."""
     lowered = (name or "").lower()
     score = 0
-    if lowered.endswith(".zip"):
-        score += 100
-    if "win" in lowered or "windows" in lowered:
-        score += 40
-    if "x64" in lowered or "amd64" in lowered:
+
+    # Archive format scoring
+    if platform == "windows":
+        if lowered.endswith(".zip"):
+            score += 100
+    else:  # linux
+        if lowered.endswith((".tar.gz", ".tgz")):
+            score += 100
+        elif lowered.endswith(".zip"):
+            score += 50  # zip is acceptable but tar.gz preferred
+
+    # Platform keyword scoring
+    if platform == "windows":
+        if "win" in lowered or "windows" in lowered:
+            score += 40
+        if "win32" in lowered:
+            score += 10
+    else:  # linux
+        if "linux" in lowered:
+            score += 40
+
+    # Architecture scoring (common to both)
+    if "x64" in lowered or "amd64" in lowered or "x86_64" in lowered:
         score += 20
-    if "win32" in lowered:
-        score += 10
+
     return score
 
 
-def select_windows_zip_asset(release: dict) -> dict:
+def select_platform_asset(release: dict, platform: Optional[str] = None) -> dict:
+    """Select the best asset for the specified platform (defaults to current)."""
+    if platform is None:
+        platform = get_current_platform()
+
     assets = release.get("assets")
     if not isinstance(assets, list) or not assets:
         raise AutoUpdateError("No release assets found.")
@@ -99,16 +132,23 @@ def select_windows_zip_asset(release: dict) -> dict:
         url = str(asset.get("browser_download_url") or "")
         if not name or not url:
             continue
-        score = _score_asset_name(name)
+        score = _score_asset_name(name, platform)
         size = int(asset.get("size") or 0)
         if score > best_score or (score == best_score and size > best_size):
             best = asset
             best_score = score
             best_size = size
 
-    if best is None or best_score < 100:
-        raise AutoUpdateError("Could not locate a Windows .zip asset in the release.")
+    min_score = 50  # At least needs a valid archive format
+    if best is None or best_score < min_score:
+        raise AutoUpdateError(f"Could not locate a {platform} asset in the release.")
     return best
+
+
+# Keep old name as alias for backwards compatibility in case I'm stupid and forgot to update something
+# P.S. I know I am stupid sometimes
+def select_windows_zip_asset(release: dict) -> dict:
+    return select_platform_asset(release, platform="windows")
 
 
 def download_with_progress(
@@ -180,15 +220,30 @@ def download_with_progress(
         )
 
 
-def extract_zip(zip_path: Path, extract_dir: Path) -> None:
-    if not zip_path.exists():
-        raise AutoUpdateError(f"Zip file not found: {zip_path}")
+def extract_archive(archive_path: Path, extract_dir: Path) -> None:
+    """Extract .zip or .tar.gz archives."""
+    if not archive_path.exists():
+        raise AutoUpdateError(f"Archive not found: {archive_path}")
     extract_dir.mkdir(parents=True, exist_ok=True)
+
+    name_lower = archive_path.name.lower()
     try:
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(extract_dir)
-    except zipfile.BadZipFile as exc:
-        raise AutoUpdateError("Downloaded file is not a valid zip.") from exc
+        if name_lower.endswith(".zip"):
+            with zipfile.ZipFile(archive_path, "r") as zf:
+                zf.extractall(extract_dir)
+        elif name_lower.endswith((".tar.gz", ".tgz")):
+            with tarfile.open(archive_path, "r:gz") as tf:
+                tf.extractall(extract_dir)
+        else:
+            raise AutoUpdateError(f"Unsupported archive format: {archive_path.name}")
+    except (zipfile.BadZipFile, tarfile.TarError) as exc:
+        raise AutoUpdateError("Downloaded file is not a valid archive.") from exc
+
+
+# Keep old name as alias
+# I swear I'm losing touch with reality
+def extract_zip(zip_path: Path, extract_dir: Path) -> None:
+    extract_archive(zip_path, extract_dir)
 
 
 def _looks_like_app_root(path: Path, expected_exe_name: Optional[str]) -> bool:
@@ -204,11 +259,10 @@ def _looks_like_app_root(path: Path, expected_exe_name: Optional[str]) -> bool:
     if "version.txt" not in entries:
         return False
 
-    if expected_exe_name and expected_exe_name in entries:
-        return True
-
-    # Fallback: any .exe at the root (Windows build layout).
-    return any(name.lower().endswith(".exe") for name in entries)
+    # Trust the expected executable name
+    if not expected_exe_name:
+        return False
+    return expected_exe_name in entries
 
 
 def find_extracted_app_root(extract_dir: Path, expected_exe_name: Optional[str]) -> Path:
@@ -224,7 +278,7 @@ def find_extracted_app_root(extract_dir: Path, expected_exe_name: Optional[str])
 
     if not candidates:
         raise AutoUpdateError(
-            "Could not locate the extracted app folder (expected an .exe, version.txt and _internal)."
+            "Could not locate the extracted app folder (expected executable, version.txt and _internal)."
         )
 
     # Prefer the shallowest match to avoid nested duplicates.
@@ -246,23 +300,23 @@ def prepare_update_from_github(
     tag = normalize_tag(remote_version)
     release = fetch_release_by_tag(owner=owner, repo=repo, tag=tag)
 
-    asset = select_windows_zip_asset(release)
+    asset = select_platform_asset(release)
     asset_name = str(asset.get("name") or "")
     asset_download_url = str(asset.get("browser_download_url") or "")
     if not asset_name or not asset_download_url:
         raise AutoUpdateError("Release asset is missing a download URL.")
 
-    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", asset_name) or "update.zip"
-    zip_path = (download_dir / safe_name).resolve()
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", asset_name) or "update.archive"
+    archive_path = (download_dir / safe_name).resolve()
 
     download_with_progress(
         url=asset_download_url,
-        dest_path=zip_path,
+        dest_path=archive_path,
         progress_cb=progress_cb,
         should_cancel=should_cancel,
     )
 
-    extract_zip(zip_path, extract_dir)
+    extract_archive(archive_path, extract_dir)
     app_root = find_extracted_app_root(extract_dir, expected_exe_name=expected_exe_name)
 
     release_name = str(release.get("name") or tag)
