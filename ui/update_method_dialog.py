@@ -58,7 +58,7 @@ class UpdateMethodDialog(QDialog):
         self.setWindowTitle("Choose Update Method")
         self.setModal(True)
         self.setFixedWidth(520)
-        self.setFixedHeight(270)
+        self.setFixedHeight(310)
 
         availability = availability or default_update_method_availability()
 

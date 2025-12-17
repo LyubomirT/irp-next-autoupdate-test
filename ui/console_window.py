@@ -2,6 +2,7 @@
 Console window for displaying application logs.
 QT-based window with black background and colored text.
 """
+import html
 from datetime import datetime
 from pathlib import Path
 
@@ -360,11 +361,14 @@ class ConsoleWindow(QMainWindow):
         """
         color = self._get_color_for_level(level_name)
         
-        # Use HTML formatting for colored text
-        html_message = f'<span style="color: {color};">{message}</span>'
+        # Escape HTML entities and convert newlines for multiline support
+        safe_msg = html.escape(message).replace('\n', '<br>')
+        html_message = f'<span style="color: {color};">{safe_msg}</span>'
         self.text_area.appendHtml(html_message)
         
-        self._line_count += 1
+        # (multiline messages count as multiple lines)
+        line_count = message.count('\n') + 1
+        self._line_count += line_count
         
         # Trim old lines if exceeded max
         if self._line_count > self.MAX_LINES:
